@@ -6,6 +6,7 @@ from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 
 from app.config import IMG_SIZE, CLAHE_CLIP_LIMIT, CLAHE_TILE_GRID, MODEL_PATH, HAND_LANDMARKER_PATH
+from app.notebook_preprocessing import NotebookPreprocessor
 
 log = logging.getLogger("palmgate")
 logging.basicConfig(
@@ -30,6 +31,7 @@ class PalmProcessor:
         self._input_index = None
         self._gap_output_index = None
         self._hand_landmarker = None
+        self.notebook_preprocessor = NotebookPreprocessor()
 
         if hand_model_path is not None:
             self._load_hand_model(hand_model_path)
@@ -208,6 +210,62 @@ class PalmProcessor:
             return None
         processed = self.preprocess_roi(roi)
         return self._run_inference(processed)
+
+    def get_embedding_from_notebook_frame(self, frame_rgb: np.ndarray):
+        result = self.notebook_preprocessor.extract_full_hand_roi(frame_rgb)
+        if result is None:
+            return None
+        return self._run_inference(result.model_input)
+
+    def get_registration_guidance_metrics(self, frame_rgb: np.ndarray, previous_metrics: dict | None = None):
+        gray = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2GRAY)
+        base = {
+            "hand_detected": False,
+            "hand_clipped": True,
+            "height_ratio": 0.0,
+            "rotation_degrees": 999.0,
+            "center_x_ratio": 0.0,
+            "brightness": float(gray.mean()),
+            "blur_score": float(cv2.Laplacian(gray, cv2.CV_64F).var()),
+            "steady": False,
+        }
+        if self._hand_landmarker is None:
+            return base
+
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
+        result = self._hand_landmarker.detect(mp_image)
+        if not result.hand_landmarks:
+            return base
+
+        landmarks = result.hand_landmarks[0]
+        xs = [lm.x for lm in landmarks]
+        ys = [lm.y for lm in landmarks]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+
+        index_mcp = landmarks[INDEX_FINGER_MCP]
+        pinky_mcp = landmarks[PINKY_MCP]
+        rotation_degrees = float(
+            np.degrees(np.arctan2(pinky_mcp.y - index_mcp.y, pinky_mcp.x - index_mcp.x))
+        )
+
+        metrics = {
+            "hand_detected": True,
+            "hand_clipped": min_x < 0.03 or max_x > 0.97 or min_y < 0.03 or max_y > 0.97,
+            "height_ratio": float(max_y - min_y),
+            "rotation_degrees": rotation_degrees,
+            "center_x_ratio": float((min_x + max_x) / 2),
+            "brightness": base["brightness"],
+            "blur_score": base["blur_score"],
+            "steady": False,
+        }
+        if previous_metrics and previous_metrics.get("hand_detected"):
+            metrics["steady"] = (
+                abs(metrics["center_x_ratio"] - previous_metrics.get("center_x_ratio", 0.0)) <= 0.03
+                and abs(metrics["height_ratio"] - previous_metrics.get("height_ratio", 0.0)) <= 0.04
+                and abs(metrics["rotation_degrees"] - previous_metrics.get("rotation_degrees", 999.0)) <= 4.0
+            )
+        return metrics
 
     def get_embedding_from_roi(self, roi_rgb: np.ndarray, rotation_angle: float = 0.0):
         """Process a pre-extracted palm ROI, skipping hand detection.

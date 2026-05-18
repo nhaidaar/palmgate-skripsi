@@ -37,9 +37,9 @@ Open: [http://127.0.0.1:8000](http://127.0.0.1:8000)
 ## Current features
 
 - **Scan Palm** — browser-camera recognition with ALLOWED / DENIED result
-- **Register** — capture 5 palm samples to enroll a new user
+- **Register** — USB-camera registration that captures 7 guided samples and stores the best 5
 - **Access Log** — timestamped history of recognition attempts
-- **Device Status** — shows worker state, camera state, FPS, and last recognition
+- **Device Status** — shows worker state, camera state, FPS, registration state, and last recognition
 - **USB Runtime** — optional always-on worker for Orange Pi with a USB camera
 
 ## Where to see recognition status
@@ -91,6 +91,21 @@ Example response:
   }
 }
 ```
+
+## Official USB registration workflow
+
+Production registration uses the Orange Pi USB camera, not the browser camera. The app captures 7 guided samples and stores the best 5 embeddings.
+
+Sample sequence:
+1. Center palm
+2. Move closer
+3. Move farther
+4. Rotate left
+5. Rotate right
+6. Shift left
+7. Shift right
+
+Browser registration is kept only for local testing and may be less reliable on the USB device.
 
 ## Orange Pi workflow
 
@@ -169,16 +184,16 @@ journalctl -u palmgate-device -f
 
 ## How recognition works
 
-1. MediaPipe Hands detects the palm region
-2. CLAHE enhances local contrast
-3. Image is resized to `224×224`
-4. `palm_recognition.tflite` generates an embedding
-5. Cosine similarity compares the query embedding against stored per-capture embeddings
-6. Result is recorded as `ALLOWED` or `DENIED`
+1. Full-hand frames use notebook-style preprocessing: background removal, mask thresholding, contour extraction, FFT valley detection, palm ROI crop, CLAHE, and resize to `224×224`
+2. `palm_recognition.tflite` generates an embedding
+3. Cosine similarity compares the query embedding against stored per-capture embeddings
+4. Result is recorded as `ALLOWED` or `DENIED`
+
+MediaPipe is used for live registration guidance only; official USB registration and recognition embeddings use the notebook-style preprocessing path.
 
 ## Cross-device / cross-brightness reliability
 
-Registration stores all 5 individual capture embeddings. At recognition time the query is compared against every stored capture and the highest single match wins. Combined with brightness normalization, this improves accuracy when enrollment and recognition cameras differ.
+USB registration captures 7 guided samples and stores the best 5 individual capture embeddings. At recognition time the query is compared against every stored capture and the highest single match wins. Combined with brightness normalization, this improves accuracy when enrollment and recognition cameras differ.
 
 ## Database migration notice
 

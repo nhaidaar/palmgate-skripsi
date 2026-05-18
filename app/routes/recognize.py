@@ -53,7 +53,7 @@ async def recognize(req: RecognizeRequest):
                   req.rotation_angle)
         embedding = palm_processor.get_embedding_from_roi(frame, req.rotation_angle)
     else:
-        embedding = palm_processor.get_embedding(frame)
+        embedding = palm_processor.get_embedding_from_notebook_frame(frame)
 
     if embedding is None:
         log.warning("RECOGNIZE | returning 422 — no hand detected in frame")

@@ -1,12 +1,35 @@
+x-palmgate-common: &palmgate-common
+  build: .
+  container_name: palmgate
+  restart: unless-stopped
+
+  expose:
+    - "8000"
+
+  volumes:
+    # ML model files — copy these to the Orange Pi once (they are gitignored):
+    #   scp palm_recognition.tflite hand_landmarker.task orangepi:/opt/palmgate/
+    - ./palm_recognition.tflite:/app/palm_recognition.tflite:ro
+    - ./hand_landmarker.task:/app/hand_landmarker.task:ro
+    # Persistent storage for the SQLite database
+    - palmgate-db:/data
+
+  # Optional: uncomment to limit resource usage on a small VPS
+  # deploy:
+  #   resources:
+  #     limits:
+  #       memory: 1g
+
+x-cloudflared-common: &cloudflared-common
+  image: cloudflare/cloudflared:latest
+  container_name: palmgate-cloudflared
+  restart: unless-stopped
+  command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+
 services:
-  palmgate:
-    build: .
-    container_name: palmgate
-    restart: unless-stopped
-
-    expose:
-      - "8000"
-
+  palmgate-browser:
+    <<: *palmgate-common
+    profiles: ["browser"]
     environment:
       # Database is stored in the named volume below so it survives rebuilds.
       - DB_PATH=/data/palmprint.db
@@ -14,27 +37,31 @@ services:
       - DEVICE_RUNTIME_ENABLED=0
       - CAMERA_SOURCE=browser
 
-    volumes:
-      # ML model files — copy these to the Orange Pi once (they are gitignored):
-      #   scp palm_recognition.tflite hand_landmarker.task orangepi:/opt/palmgate/
-      - ./palm_recognition.tflite:/app/palm_recognition.tflite:ro
-      - ./hand_landmarker.task:/app/hand_landmarker.task:ro
-      # Persistent storage for the SQLite database
-      - palmgate-db:/data
+  palmgate-usb:
+    <<: *palmgate-common
+    profiles: ["usb"]
+    environment:
+      # Database is stored in the named volume below so it survives rebuilds.
+      - DB_PATH=/data/palmprint.db
+      # USB mode: use the Orange Pi USB camera for registration and recognition.
+      - DEVICE_RUNTIME_ENABLED=1
+      - CAMERA_SOURCE=usb
+      - CAMERA_DEVICE_INDEX=0
+      - DEVICE_FRAME_INTERVAL_MS=1000
+    devices:
+      - /dev/video0:/dev/video0
 
-    # Optional: uncomment to limit resource usage on a small VPS
-    # deploy:
-    #   resources:
-    #     limits:
-    #       memory: 1g
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: palmgate-cloudflared
-    restart: unless-stopped
+  cloudflared-browser:
+    <<: *cloudflared-common
+    profiles: ["browser"]
     depends_on:
-      - palmgate
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+      - palmgate-browser
+
+  cloudflared-usb:
+    <<: *cloudflared-common
+    profiles: ["usb"]
+    depends_on:
+      - palmgate-usb
 
 volumes:
   palmgate-db:

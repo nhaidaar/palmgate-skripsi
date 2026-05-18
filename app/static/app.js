@@ -12,6 +12,16 @@ const REG_HOLD_MS      = 1000;   // hold steady before auto-capture
 const REG_COOLDOWN_MS  = 1500;   // gap between auto-captures
 const SCAN_COOLDOWN_MS = 3000;   // cooldown after scan result
 
+const USB_REGISTRATION_SAMPLES = [
+  { title: 'Sample 1/7: Center palm', desc: 'Palm centered, vertical, fills about 55% of the frame.' },
+  { title: 'Sample 2/7: Move closer', desc: 'Move closer until the full hand fills about 65–70% of the frame.' },
+  { title: 'Sample 3/7: Move farther', desc: 'Move farther until the full hand fills about 40–45% of the frame.' },
+  { title: 'Sample 4/7: Rotate left', desc: 'Rotate your palm left about 10 degrees.' },
+  { title: 'Sample 5/7: Rotate right', desc: 'Rotate your palm right about 10 degrees.' },
+  { title: 'Sample 6/7: Shift left', desc: 'Move your hand slightly left while keeping the full hand visible.' },
+  { title: 'Sample 7/7: Shift right', desc: 'Move your hand slightly right while keeping the full hand visible.' },
+];
+
 // Ring circumference for r=42: 2π×42 ≈ 263.9
 const RING_C = 2 * Math.PI * 42;
 
@@ -23,6 +33,9 @@ const state = {
   stream: null,
   currentTab: 'scan',
   autoMode: true,
+  registrationMode: 'usb',
+  usbRegistrationActive: false,
+  usbStatusTimer: null,
   capturedImages: [],   // [{ data: base64, isRoi: bool }]
   handSeenMs: 0,
   lastFrameTs: null,
@@ -48,6 +61,10 @@ const btnRegister      = $('btnRegister');
 const btnRefresh       = $('btnRefresh');
 const btnReset         = $('btnReset');
 const userName         = $('userName');
+const btnStartUsbRegistration = $('btnStartUsbRegistration');
+const btnCaptureUsbSample = $('btnCaptureUsbSample');
+const btnFinalizeUsbRegistration = $('btnFinalizeUsbRegistration');
+const btnCancelUsbRegistration = $('btnCancelUsbRegistration');
 
 // ── MediaPipe init ───────────────────────────────────────────────
 let handLandmarker = null;
@@ -314,7 +331,7 @@ function updateRingProgress() {
     const label  = $('ringLabelReg');
     const pct    = Math.min(state.handSeenMs / holdMs, 1);
 
-    if (state.handSeenMs > 20 && state.capturedImages.length < 5 && Date.now() >= state.regCooldownUntil) {
+    if (state.registrationMode === 'browser' && state.handSeenMs > 20 && state.capturedImages.length < 5 && Date.now() >= state.regCooldownUntil) {
       ring.style.display = 'block';
       fill.style.strokeDashoffset = RING_C * (1 - pct);
       label.textContent = pct >= 1 ? '✓' : 'Hold';
@@ -336,7 +353,7 @@ function runAutoLogic() {
     }
   }
 
-  if (state.currentTab === 'register') {
+  if (state.currentTab === 'register' && state.registrationMode === 'browser') {
     const hasName = userName.value.trim().length > 0;
     if (
       state.handSeenMs >= REG_HOLD_MS &&
@@ -447,19 +464,9 @@ async function triggerScan() {
   triggerFlash('captureFlash');
   showScanning();
 
-  // Prefer client-side ROI crop (skips server MediaPipe, saves ~500–1500ms).
-  // Also send the knuckle-line rotation angle so the server can de-rotate the
-  // ROI before preprocessing, matching the training pipeline.
-  let b64, isRoi, rotationAngle = 0;
-  if (state.lastLandmarks && state.lastLandmarks.length > 0) {
-    const roi = extractClientROI(video, state.lastLandmarks[0]);
-    b64           = roi.data;
-    rotationAngle = roi.rotationAngle;
-    isRoi = true;
-  } else {
-    b64   = captureFrame(video);
-    isRoi = false;
-  }
+  const b64 = captureFrame(video);
+  const isRoi = false;
+  const rotationAngle = 0;
 
   const scanStart = performance.now();
 
@@ -549,7 +556,137 @@ function updateStats(status) {
   $('statDenied').textContent  = state.scanStats.denied;
 }
 
-// ── Register ─────────────────────────────────────────────────────
+// ── USB registration ─────────────────────────────────────────────
+btnStartUsbRegistration?.addEventListener('click', async () => {
+  const name = userName.value.trim();
+  if (!name) return setFeedback('Name is required', 'error');
+  const result = await startUsbRegistration(name);
+  if (result.detail) return setFeedback(result.detail, 'error');
+  state.usbRegistrationActive = true;
+  setFeedback('USB registration started.', 'success');
+  startUsbStatusPolling();
+  await refreshUsbRegistrationStatus();
+});
+
+btnCaptureUsbSample?.addEventListener('click', async () => {
+  const result = await captureUsbSample();
+  if (result.detail) return setFeedback(result.detail, 'error');
+  triggerFlash('captureFlashReg');
+  setFeedback(`Captured sample ${result.sample_index + 1}.`, 'success');
+  await refreshUsbRegistrationStatus();
+});
+
+btnFinalizeUsbRegistration?.addEventListener('click', async () => {
+  const result = await finalizeUsbRegistration();
+  if (result.detail) return setFeedback(result.detail, 'error');
+  setFeedback(`✓ ${result.name} enrolled successfully`, 'success');
+  state.usbRegistrationActive = false;
+  stopUsbStatusPolling();
+  renderUsbRegistrationStatus({ active: false, captured_count: 0 });
+  userName.value = '';
+  await loadUsers();
+  await loadStats();
+});
+
+btnCancelUsbRegistration?.addEventListener('click', async () => {
+  await cancelUsbRegistration();
+  state.usbRegistrationActive = false;
+  stopUsbStatusPolling();
+  setFeedback('USB registration cancelled.', '');
+  renderUsbRegistrationStatus({ active: false, captured_count: 0 });
+});
+
+$('browserRegistrationFallback')?.addEventListener('toggle', (event) => {
+  state.registrationMode = event.target.open ? 'browser' : 'usb';
+  state.handSeenMs = 0;
+  $('autoscanRingReg').style.display = 'none';
+});
+
+async function startUsbRegistration(name) {
+  const res = await fetch('/api/device-registration/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  return await res.json();
+}
+
+async function getUsbRegistrationStatus() {
+  const res = await fetch('/api/device-registration/status');
+  return await res.json();
+}
+
+async function captureUsbSample() {
+  const res = await fetch('/api/device-registration/capture', { method: 'POST' });
+  return await res.json();
+}
+
+async function finalizeUsbRegistration() {
+  const res = await fetch('/api/device-registration/finalize', { method: 'POST' });
+  return await res.json();
+}
+
+async function cancelUsbRegistration() {
+  const res = await fetch('/api/device-registration/cancel', { method: 'POST' });
+  return await res.json();
+}
+
+function startUsbStatusPolling() {
+  stopUsbStatusPolling();
+  state.usbStatusTimer = setInterval(refreshUsbRegistrationStatus, 1000);
+}
+
+function stopUsbStatusPolling() {
+  if (state.usbStatusTimer) clearInterval(state.usbStatusTimer);
+  state.usbStatusTimer = null;
+}
+
+async function refreshUsbRegistrationStatus() {
+  const status = await getUsbRegistrationStatus();
+  renderUsbRegistrationStatus(status);
+}
+
+function renderUsbRegistrationStatus(status) {
+  const index = status.current_sample_index || 0;
+  const sample = USB_REGISTRATION_SAMPLES[Math.min(index, USB_REGISTRATION_SAMPLES.length - 1)];
+  $('usbSampleTitle').textContent = sample.title;
+  $('usbSampleDesc').textContent = sample.desc;
+  $('captureCounter').textContent = `${status.captured_count || 0} / 7`;
+
+  const guidance = status.guidance;
+  renderQualityList(guidance);
+
+  const active = !!status.active;
+  btnStartUsbRegistration.disabled = active;
+  btnCaptureUsbSample.disabled = !(guidance && guidance.acceptable);
+  btnFinalizeUsbRegistration.disabled = (status.captured_count || 0) < 7;
+  btnCancelUsbRegistration.disabled = !active;
+}
+
+function renderQualityList(guidance) {
+  const list = $('usbQualityList');
+  if (!guidance) {
+    list.innerHTML = '<li><span>Status</span><strong class="bad">Waiting for guidance</strong></li>';
+    return;
+  }
+  const failures = new Set(guidance.failures || []);
+  const rows = [
+    ['hand', 'Hand detected'],
+    ['clipping', 'Full hand visible'],
+    ['size', 'Target size'],
+    ['rotation', 'Target rotation'],
+    ['position', 'Target position'],
+    ['brightness', 'Lighting'],
+    ['sharpness', 'Sharpness'],
+    ['steady', 'Steady frame'],
+  ];
+  list.innerHTML = rows.map(([key, label]) => {
+    const ok = !failures.has(key);
+    return `<li><span>${label}</span><strong class="${ok ? 'ok' : 'bad'}">${ok ? 'OK' : 'Fix'}</strong></li>`;
+  }).join('');
+}
+
+// ── Browser registration fallback ─────────────────────────────────
 btnCapture.addEventListener('click', () => triggerCapture());
 
 btnReset?.addEventListener('click', () => {
@@ -577,7 +714,7 @@ function triggerCapture() {
   state.capturedImages.push({ data: b64, isRoi, rotationAngle });
 
   const count = state.capturedImages.length;
-  $('captureCounter').textContent = `${count} / 5`;
+  $('browserCaptureCounter').textContent = `${count} / 5`;
   if (btnReset) btnReset.disabled = false;
 
   document.querySelectorAll('.dot').forEach((dot, i) =>
@@ -661,9 +798,9 @@ function resetRegistration() {
   state.capturedImages = [];
   state.handSeenMs = 0;
   userName.value = '';
-  $('captureCounter').textContent = '0 / 5';
+  $('browserCaptureCounter').textContent = '0 / 5';
   document.querySelectorAll('.dot').forEach((d) => d.classList.remove('filled'));
-  $('registerHint').textContent = 'Enter a name, then hold your palm in front of the camera.';
+  $('registerHint').textContent = 'Enter a name, start USB registration, then capture each guided sample when the frame is acceptable.';
   btnRegister.disabled = true;
   if (btnReset) btnReset.disabled = true;
   $('autoscanRingReg').style.display = 'none';

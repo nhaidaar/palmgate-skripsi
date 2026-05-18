@@ -1,5 +1,9 @@
+from dataclasses import dataclass, field
 import threading
 import time
+import uuid
+
+import numpy as np
 
 from app.camera import OpenCVCameraSource
 from app.config import (
@@ -8,9 +12,24 @@ from app.config import (
     DEVICE_FRAME_INTERVAL_MS,
     DEVICE_HOLD_MS,
     DEVICE_STATUS_HEARTBEAT_MS,
+    DUPLICATE_THRESHOLD,
     SIMILARITY_THRESHOLD,
+    USB_REGISTRATION_CAPTURES,
+    USB_REGISTRATION_MIN_VALID,
+    USB_REGISTRATION_STORE_EMBEDDINGS,
 )
 from app.services.recognition_service import match_embedding_and_log
+from app.services.registration_quality import SAMPLE_TARGETS, evaluate_guidance
+from app.services.registration_ranking import RegistrationSample, rank_registration_samples
+
+
+@dataclass
+class DeviceRegistrationSession:
+    id: str
+    name: str
+    current_sample_index: int = 0
+    captured_samples: list = field(default_factory=list)
+    last_guidance: dict | None = None
 
 
 class SystemClock:
@@ -44,15 +63,87 @@ class DeviceRuntime:
         self.cooldown_until_ms = 0
         self.last_heartbeat_ms = None
         self.last_recognition_at = None
+        self.worker_state = "running"
+        self.registration_session = None
         self._thread = None
         self._stop_event = threading.Event()
+
+    def start_registration(self, name: str):
+        if self.registration_session is not None:
+            raise RuntimeError("Registration already active")
+        self.registration_session = DeviceRegistrationSession(id=str(uuid.uuid4()), name=name.strip())
+        self.worker_state = "registration_active"
+        self.hand_seen_since_ms = None
+        self.cooldown_until_ms = 0
+        return self.registration_session
+
+    def cancel_registration(self):
+        self.registration_session = None
+        self.worker_state = "running"
+
+    def capture_registration_sample(self):
+        if self.registration_session is None:
+            raise RuntimeError("No registration active")
+        if self.registration_session.current_sample_index >= USB_REGISTRATION_CAPTURES:
+            raise RuntimeError("All registration samples captured")
+        guidance = self.registration_session.last_guidance
+        if not guidance or not guidance.get("acceptable", False):
+            raise RuntimeError("Frame does not satisfy guidance")
+        frame = self.camera.read()
+        embedding = self.palm_processor.get_embedding_from_notebook_frame(frame)
+        if embedding is None:
+            raise RuntimeError("Notebook preprocessing failed")
+        sample = {
+            "sample_index": self.registration_session.current_sample_index,
+            "quality_score": float(guidance.get("score", 1.0)),
+            "embedding": embedding,
+        }
+        self.registration_session.captured_samples.append(sample)
+        self.registration_session.current_sample_index += 1
+        return sample
+
+    def finalize_registration(self):
+        if self.registration_session is None:
+            raise RuntimeError("No registration active")
+
+        samples = [
+            RegistrationSample(
+                sample_index=item["sample_index"],
+                quality_score=item["quality_score"],
+                embedding=item["embedding"],
+            )
+            for item in self.registration_session.captured_samples
+        ]
+        ranked = rank_registration_samples(
+            samples,
+            keep=USB_REGISTRATION_STORE_EMBEDDINGS,
+            min_similarity=self.threshold,
+        )
+        if len(ranked) < USB_REGISTRATION_MIN_VALID:
+            raise RuntimeError("Not enough valid registration samples")
+
+        embeddings = [sample.embedding.astype(np.float32) for sample in ranked]
+        avg_embedding = np.mean(embeddings, axis=0).astype(np.float32)
+        stored = self.db.get_all_embeddings()
+        duplicate = self.palm_processor.compute_similarity(avg_embedding, stored, DUPLICATE_THRESHOLD)
+        if duplicate["status"] == "ALLOWED":
+            raise RuntimeError(f"This palm is already registered as '{duplicate['name']}'")
+        user_id = self.db.add_user(
+            self.registration_session.name,
+            avg_embedding,
+            individual_embeddings=embeddings,
+        )
+        name = self.registration_session.name
+        self.registration_session = None
+        self.worker_state = "running"
+        return {"user_id": user_id, "name": name, "stored_embeddings": len(embeddings)}
 
     def tick(self):
         now_ms = self.clock.now()
 
         if self.last_heartbeat_ms is None or now_ms - self.last_heartbeat_ms >= self.heartbeat_ms:
             self.db.upsert_device_status(
-                worker_state="running",
+                worker_state=self.worker_state,
                 camera_connected=True,
                 last_error=None,
                 fps=(1000 / self.frame_interval_ms) if self.frame_interval_ms > 0 else None,
@@ -61,11 +152,30 @@ class DeviceRuntime:
             )
             self.last_heartbeat_ms = now_ms
 
+        if self.registration_session is not None:
+            frame = self.camera.read()
+            previous_metrics = None
+            if self.registration_session.last_guidance:
+                previous_metrics = self.registration_session.last_guidance.get("metrics")
+            metrics = self.palm_processor.get_registration_guidance_metrics(frame, previous_metrics)
+            target_index = min(self.registration_session.current_sample_index, USB_REGISTRATION_CAPTURES - 1)
+            guidance = evaluate_guidance(target_index, metrics)
+            target = SAMPLE_TARGETS[target_index]
+            self.registration_session.last_guidance = {
+                "target": target.key,
+                "label": target.label,
+                "acceptable": guidance.acceptable,
+                "failures": guidance.failures,
+                "score": guidance.score,
+                "metrics": metrics,
+            }
+            return None
+
         if now_ms < self.cooldown_until_ms:
             return None
 
         frame = self.camera.read()
-        embedding = self.palm_processor.get_embedding(frame)
+        embedding = self.palm_processor.get_embedding_from_notebook_frame(frame)
         if embedding is None:
             self.hand_seen_since_ms = None
             return None
@@ -82,7 +192,7 @@ class DeviceRuntime:
         self.cooldown_until_ms = now_ms + self.cooldown_ms
         self.hand_seen_since_ms = None
         self.db.upsert_device_status(
-            worker_state="running",
+            worker_state=self.worker_state,
             camera_connected=True,
             last_error=None,
             fps=(1000 / self.frame_interval_ms) if self.frame_interval_ms > 0 else None,

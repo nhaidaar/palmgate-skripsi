@@ -9,7 +9,7 @@ from app.config import CAMERA_SOURCE, DEVICE_RUNTIME_ENABLED, MODEL_PATH, DB_PAT
 from app.database import Database
 from app.device_runtime import build_device_runtime
 from app.palm_processor import PalmProcessor
-from app.routes import recognize, register, users, logs, debug, status
+from app.routes import recognize, register, users, logs, debug, status, device_registration
 
 db: Database = None
 palm_processor: PalmProcessor = None
@@ -44,6 +44,7 @@ app.include_router(users.router)
 app.include_router(logs.router)
 app.include_router(debug.router)
 app.include_router(status.router)
+app.include_router(device_registration.router)
 
 static_dir = Path(__file__).parent / "static"
 static_dir.mkdir(exist_ok=True)

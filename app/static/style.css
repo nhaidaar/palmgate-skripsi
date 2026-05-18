@@ -822,6 +822,88 @@ body {
 .register-feedback.success { color: var(--success); }
 .register-feedback.error   { color: var(--error); }
 
+.usb-registration-status {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+}
+
+.sample-title {
+  font-weight: 700;
+  color: var(--text-1);
+  margin-bottom: 6px;
+}
+
+.sample-desc {
+  color: var(--text-2);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.capture-counter-inline {
+  margin-top: 10px;
+  font-size: 0.85rem;
+  color: var(--text-2);
+}
+
+.capture-counter-inline strong {
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+
+.quality-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.quality-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.82rem;
+  color: var(--text-2);
+}
+
+.quality-list strong {
+  font-size: 0.75rem;
+}
+
+.quality-list .ok { color: var(--success); }
+.quality-list .bad { color: var(--error); }
+
+.usb-register-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.usb-register-actions .btn {
+  margin-top: 0;
+}
+
+.advanced-register {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1rem;
+  color: var(--text-2);
+}
+
+.advanced-register summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--text-1);
+}
+
+.advanced-register > * + * {
+  margin-top: 1rem;
+}
+
 /* ──────────────────────────────────────────
    LOG PANEL
 ────────────────────────────────────────── */
