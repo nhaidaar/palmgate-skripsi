@@ -14,3 +14,12 @@ def test_device_runtime_env_overrides(monkeypatch):
     assert config.CAMERA_SOURCE == "usb"
     assert config.CAMERA_DEVICE_INDEX == 0
     assert config.APP_HOST == "0.0.0.0"
+
+
+def test_notebook_rembg_env_override(monkeypatch):
+    monkeypatch.setenv("NOTEBOOK_REMBG_ENABLED", "0")
+
+    import app.config as config
+    importlib.reload(config)
+
+    assert config.NOTEBOOK_REMBG_ENABLED is False

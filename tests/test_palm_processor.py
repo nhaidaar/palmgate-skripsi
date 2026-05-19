@@ -32,6 +32,22 @@ def test_preprocess_roi(processor):
     assert processed.dtype == np.float32
 
 
+def test_palm_processor_uses_notebook_rembg_config(monkeypatch):
+    monkeypatch.setenv("NOTEBOOK_REMBG_ENABLED", "0")
+
+    import app.config as config
+    import app.palm_processor as palm_processor_module
+    import importlib
+    importlib.reload(config)
+    importlib.reload(palm_processor_module)
+
+    proc = palm_processor_module.PalmProcessor(model_path=None, hand_model_path=None)
+    try:
+        assert proc.notebook_preprocessor.rembg_enabled is False
+    finally:
+        proc.close()
+
+
 def test_get_embedding_from_notebook_frame_returns_none_when_preprocessing_fails(processor):
     class FakeNotebookPreprocessor:
         def extract_full_hand_roi(self, frame):

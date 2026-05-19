@@ -5,7 +5,14 @@ import mediapipe as mp
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 
-from app.config import IMG_SIZE, CLAHE_CLIP_LIMIT, CLAHE_TILE_GRID, MODEL_PATH, HAND_LANDMARKER_PATH
+from app.config import (
+    CLAHE_CLIP_LIMIT,
+    CLAHE_TILE_GRID,
+    HAND_LANDMARKER_PATH,
+    IMG_SIZE,
+    MODEL_PATH,
+    NOTEBOOK_REMBG_ENABLED,
+)
 from app.notebook_preprocessing import NotebookPreprocessor
 
 log = logging.getLogger("palmgate")
@@ -35,7 +42,7 @@ class PalmProcessor:
         self._input_index = None
         self._gap_output_index = None
         self._hand_landmarker = None
-        self.notebook_preprocessor = NotebookPreprocessor()
+        self.notebook_preprocessor = NotebookPreprocessor(rembg_enabled=NOTEBOOK_REMBG_ENABLED)
 
         if hand_model_path is not None:
             self._load_hand_model(hand_model_path)
