@@ -873,8 +873,15 @@ body {
   font-size: 0.75rem;
 }
 
+.quality-list em {
+  color: var(--text-3);
+  font-size: 0.68rem;
+  font-style: normal;
+}
+
 .quality-list .ok { color: var(--success); }
 .quality-list .bad { color: var(--error); }
+.quality-list .warn { color: var(--accent); }
 
 .usb-registration-preview-frame {
   margin-bottom: 16px;

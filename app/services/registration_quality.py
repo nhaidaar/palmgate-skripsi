@@ -23,6 +23,7 @@ class SampleTarget:
 class GuidanceResult:
     acceptable: bool
     failures: list[str]
+    blockers: list[str]
     score: float
 
 
@@ -40,9 +41,11 @@ SAMPLE_TARGETS = [
 def evaluate_guidance(sample_index: int, metrics: dict) -> GuidanceResult:
     target = SAMPLE_TARGETS[sample_index]
     failures = []
+    blockers = []
 
     if not metrics.get("hand_detected", False):
         failures.append("hand")
+        blockers.append("hand")
     if metrics.get("hand_clipped", True):
         failures.append("clipping")
     if not target.min_height_ratio <= metrics.get("height_ratio", 0.0) <= target.max_height_ratio:
@@ -53,10 +56,12 @@ def evaluate_guidance(sample_index: int, metrics: dict) -> GuidanceResult:
         failures.append("position")
     if not USB_REGISTRATION_MIN_BRIGHTNESS <= metrics.get("brightness", 0.0) <= USB_REGISTRATION_MAX_BRIGHTNESS:
         failures.append("brightness")
+        blockers.append("brightness")
     if metrics.get("blur_score", 0.0) < USB_REGISTRATION_MIN_BLUR:
         failures.append("sharpness")
+        blockers.append("sharpness")
     if not metrics.get("steady", False):
         failures.append("steady")
 
-    score = max(0.0, 1.0 - (len(failures) * 0.15))
-    return GuidanceResult(acceptable=not failures, failures=failures, score=score)
+    score = max(0.0, 1.0 - (len(failures) * 0.10) - (len(blockers) * 0.20))
+    return GuidanceResult(acceptable=not blockers, failures=failures, blockers=blockers, score=score)

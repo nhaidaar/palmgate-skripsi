@@ -199,6 +199,7 @@ class DeviceRuntime:
                 "label": target.label,
                 "acceptable": guidance.acceptable,
                 "failures": guidance.failures,
+                "blockers": guidance.blockers,
                 "score": guidance.score,
                 "metrics": metrics,
             }

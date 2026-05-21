@@ -689,19 +689,23 @@ function renderQualityList(guidance) {
     return;
   }
   const failures = new Set(guidance.failures || []);
+  const blockers = new Set(guidance.blockers || []);
   const rows = [
-    ['hand', 'Hand detected'],
-    ['clipping', 'Full hand visible'],
-    ['size', 'Target size'],
-    ['rotation', 'Target rotation'],
-    ['position', 'Target position'],
-    ['brightness', 'Lighting'],
-    ['sharpness', 'Sharpness'],
-    ['steady', 'Steady frame'],
+    ['hand', 'Hand detected', 'Required'],
+    ['brightness', 'Lighting', 'Required'],
+    ['sharpness', 'Sharpness', 'Required'],
+    ['clipping', 'Full hand visible', 'Guide'],
+    ['size', 'Target size', 'Guide'],
+    ['rotation', 'Target rotation', 'Guide'],
+    ['position', 'Target position', 'Guide'],
+    ['steady', 'Steady frame', 'Guide'],
   ];
-  list.innerHTML = rows.map(([key, label]) => {
+  list.innerHTML = rows.map(([key, label, type]) => {
     const ok = !failures.has(key);
-    return `<li><span>${label}</span><strong class="${ok ? 'ok' : 'bad'}">${ok ? 'OK' : 'Fix'}</strong></li>`;
+    const blocking = blockers.has(key);
+    const status = ok ? 'OK' : (blocking ? 'Fix' : 'Adjust');
+    const cls = ok ? 'ok' : (blocking ? 'bad' : 'warn');
+    return `<li><span>${label} <em>${type}</em></span><strong class="${cls}">${status}</strong></li>`;
   }).join('');
 }
 

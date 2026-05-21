@@ -36,3 +36,12 @@ def test_usb_registration_panel_has_camera_preview():
     assert "usbRegistrationPreview" in html
     assert "usbRegistrationPreview" in source
     assert "usbRegistrationPreview.src = '/api/device-registration/preview.mjpg'" in source
+
+
+def test_usb_quality_ui_distinguishes_required_and_guidance_items():
+    source = Path("app/static/app.js").read_text()
+
+    assert "const blockers = new Set(guidance.blockers || [])" in source
+    assert "Required" in source
+    assert "Guide" in source
+    assert "Adjust" in source
