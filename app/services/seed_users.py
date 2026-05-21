@@ -72,6 +72,25 @@ def create_seed_variants(roi: np.ndarray) -> list[SeedVariant]:
     ]
 
 
+def _select_seed_embeddings(samples: list[RegistrationSample], source_name: str) -> SeedEmbeddingResult:
+    selected = rank_registration_samples(
+        samples,
+        keep=USB_REGISTRATION_STORE_EMBEDDINGS,
+        min_similarity=SIMILARITY_THRESHOLD,
+    )
+    if len(selected) < USB_REGISTRATION_STORE_EMBEDDINGS:
+        raise RuntimeError(f"Not enough consistent seed {source_name}")
+
+    embeddings = [sample.embedding.astype(np.float32) for sample in selected]
+    average = np.mean(embeddings, axis=0).astype(np.float32)
+    return SeedEmbeddingResult(
+        embedding=average,
+        individual_embeddings=embeddings,
+        variant_count=len(samples),
+        selected_count=len(selected),
+    )
+
+
 def build_seed_embedding(frame_rgb: np.ndarray, palm_processor, preprocessor) -> SeedEmbeddingResult:
     extracted = preprocessor.extract_full_hand_roi(frame_rgb)
     if extracted is None:
@@ -84,21 +103,39 @@ def build_seed_embedding(frame_rgb: np.ndarray, palm_processor, preprocessor) ->
         embedding = palm_processor._run_inference(processed).astype(np.float32)
         samples.append(RegistrationSample(index, 1.0, embedding))
 
-    selected = rank_registration_samples(
-        samples,
-        keep=USB_REGISTRATION_STORE_EMBEDDINGS,
-        min_similarity=SIMILARITY_THRESHOLD,
+    result = _select_seed_embeddings(samples, "augmentations")
+    return SeedEmbeddingResult(
+        embedding=result.embedding,
+        individual_embeddings=[result.embedding],
+        variant_count=result.variant_count,
+        selected_count=result.selected_count,
     )
-    if len(selected) < USB_REGISTRATION_STORE_EMBEDDINGS:
-        raise RuntimeError("Not enough consistent seed augmentations")
 
-    embeddings = [sample.embedding.astype(np.float32) for sample in selected]
+
+def build_seed_embedding_from_frames(
+    frames_rgb: list[np.ndarray],
+    palm_processor,
+    preprocessor,
+) -> SeedEmbeddingResult:
+    samples = []
+    for index, frame_rgb in enumerate(frames_rgb):
+        extracted = preprocessor.extract_full_hand_roi(frame_rgb)
+        if extracted is None:
+            continue
+        processed = preprocessor.preprocess_roi_to_model_input(extracted.roi)
+        embedding = palm_processor._run_inference(processed).astype(np.float32)
+        samples.append(RegistrationSample(index, 1.0, embedding))
+
+    if not samples:
+        raise RuntimeError("No valid seed captures")
+
+    embeddings = [sample.embedding.astype(np.float32) for sample in samples]
     average = np.mean(embeddings, axis=0).astype(np.float32)
     return SeedEmbeddingResult(
         embedding=average,
-        individual_embeddings=[average],
-        variant_count=len(variants),
-        selected_count=len(selected),
+        individual_embeddings=embeddings,
+        variant_count=len(samples),
+        selected_count=len(samples),
     )
 
 
@@ -113,6 +150,13 @@ def _seed_image_paths(seed_dir: Path) -> list[Path]:
     return sorted(
         path for path in seed_dir.iterdir()
         if path.is_file() and path.suffix.lower() in SEED_IMAGE_EXTENSIONS
+    )
+
+
+def _seed_person_dirs(seed_dir: Path) -> list[Path]:
+    return sorted(
+        path for path in seed_dir.iterdir()
+        if path.is_dir() and _seed_image_paths(path)
     )
 
 
@@ -145,6 +189,25 @@ def seed_users_from_directory(
     created = []
     skipped = []
     failed = {}
+
+    person_dirs = _seed_person_dirs(seed_dir)
+    if person_dirs:
+        for person_dir in person_dirs:
+            name = person_dir.name
+            if name in existing_names:
+                skipped.append(name)
+                continue
+
+            try:
+                frames = [read_image(path) for path in _seed_image_paths(person_dir)]
+                result = build_seed_embedding_from_frames(frames, palm_processor, preprocessor)
+                db.add_user(name, result.embedding, individual_embeddings=result.individual_embeddings)
+                created.append(name)
+                existing_names.add(name)
+            except Exception as exc:
+                failed[name] = str(exc)
+
+        return SeedUsersSummary(created=created, skipped=skipped, failed=failed)
 
     for path in _seed_image_paths(seed_dir):
         name = path.stem

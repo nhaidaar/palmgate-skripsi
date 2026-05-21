@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.config import DB_PATH
+from app.config import DB_PATH, NOTEBOOK_REMBG_ENABLED
 from app.database import Database
 from app.notebook_preprocessing import NotebookPreprocessor
 from app.palm_processor import PalmProcessor
@@ -20,7 +20,7 @@ def main():
 
     db = Database(args.db)
     palm_processor = PalmProcessor(hand_model_path=None)
-    preprocessor = NotebookPreprocessor()
+    preprocessor = NotebookPreprocessor(rembg_enabled=NOTEBOOK_REMBG_ENABLED)
     try:
         summary = seed_users_from_directory(
             args.seed_dir,
