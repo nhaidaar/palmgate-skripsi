@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.config import DB_PATH
+from app.config import CAMERA_SOURCE, DB_PATH, DEVICE_RUNTIME_ENABLED
 
 router = APIRouter()
 
@@ -37,7 +37,12 @@ async def status():
             "registration_captured_count": 0,
         }
     return {
-        "app": {"mode": "hybrid", "version": "local"},
+        "app": {
+            "mode": "hybrid",
+            "version": "local",
+            "camera_source": CAMERA_SOURCE,
+            "device_runtime_enabled": DEVICE_RUNTIME_ENABLED,
+        },
         "database": {"path": str(DB_PATH)},
         "device": device,
     }

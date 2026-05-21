@@ -13,6 +13,8 @@ def test_status_endpoint_returns_device_status():
     assert "app" in data
     assert "device" in data
     assert "database" in data
+    assert "camera_source" in data["app"]
+    assert "device_runtime_enabled" in data["app"]
 
 
 def test_status_includes_registration_runtime_state(monkeypatch):

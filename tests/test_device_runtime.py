@@ -17,6 +17,18 @@ def test_runtime_recognizes_after_hold_threshold():
             return np.zeros((240, 320, 3), dtype=np.uint8)
 
     class FakeProcessor:
+        def get_registration_guidance_metrics(self, frame, previous_metrics=None):
+            return {
+                "hand_detected": True,
+                "hand_clipped": False,
+                "height_ratio": 0.55,
+                "rotation_degrees": 0.0,
+                "center_x_ratio": 0.5,
+                "brightness": 120.0,
+                "blur_score": 150.0,
+                "steady": True,
+            }
+
         def get_embedding_from_notebook_frame(self, frame):
             return np.ones(4, dtype=np.float32)
 
@@ -60,6 +72,46 @@ def test_runtime_recognizes_after_hold_threshold():
     runtime.tick()
 
     assert runtime.db.logged[0][2] == "ALLOWED"
+
+
+def test_runtime_does_not_recognize_without_detected_hand():
+    from app.device_runtime import DeviceRuntime
+
+    class FakeClock:
+        def __init__(self):
+            self.now_ms = 0
+
+        def now(self):
+            return self.now_ms
+
+    class FakeCamera:
+        def read(self):
+            return np.zeros((240, 320, 3), dtype=np.uint8)
+
+    class FakeProcessor:
+        def get_registration_guidance_metrics(self, frame, previous_metrics=None):
+            return {"hand_detected": False, "hand_clipped": True}
+
+        def get_embedding_from_notebook_frame(self, frame):
+            raise AssertionError("background must not be embedded without a detected hand")
+
+    class FakeDB:
+        def upsert_device_status(self, **kwargs):
+            self.status = kwargs
+
+    runtime = DeviceRuntime(
+        camera=FakeCamera(),
+        palm_processor=FakeProcessor(),
+        db=FakeDB(),
+        clock=FakeClock(),
+        hold_ms=1000,
+    )
+
+    runtime.clock.now_ms = 0
+    assert runtime.tick() is None
+    runtime.clock.now_ms = 1200
+    assert runtime.tick() is None
+    assert runtime.hand_seen_since_ms is None
 
 
 def test_start_registration_pauses_recognition():

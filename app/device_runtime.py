@@ -175,6 +175,11 @@ class DeviceRuntime:
             return None
 
         frame = self.camera.read()
+        metrics = self.palm_processor.get_registration_guidance_metrics(frame)
+        if not metrics.get("hand_detected", False) or metrics.get("hand_clipped", True):
+            self.hand_seen_since_ms = None
+            return None
+
         embedding = self.palm_processor.get_embedding_from_notebook_frame(frame)
         if embedding is None:
             self.hand_seen_since_ms = None

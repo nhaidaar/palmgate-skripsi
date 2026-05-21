@@ -36,6 +36,7 @@ const state = {
   registrationMode: 'usb',
   usbRegistrationActive: false,
   usbStatusTimer: null,
+  usbDeviceMode: false,
   capturedImages: [],   // [{ data: base64, isRoi: bool }]
   handSeenMs: 0,
   lastFrameTs: null,
@@ -919,6 +920,7 @@ async function loadStatus() {
   try {
     const data = await fetch('/api/status').then((r) => r.json());
     const device = data.device || {};
+    state.usbDeviceMode = data.app?.camera_source === 'usb' && data.app?.device_runtime_enabled === true;
     const workerState = device.worker_state ?? 'disabled';
     const cameraConnected = !!device.camera_connected;
 
@@ -944,10 +946,16 @@ const esc = (s) =>
 
 // ── Init ─────────────────────────────────────────────────────────
 (async () => {
-  await startCamera();
   loadStats();
-  loadStatus();
+  await loadStatus();
   setInterval(loadStatus, 5000);
-  video.addEventListener('loadeddata', () => initMediaPipe(), { once: true });
-  if (video.readyState >= 2) initMediaPipe();
+
+  if (!state.usbDeviceMode) {
+    await startCamera();
+    video.addEventListener('loadeddata', () => initMediaPipe(), { once: true });
+    if (video.readyState >= 2) initMediaPipe();
+  } else {
+    $('cameraStatus').innerHTML = '<span class="cam-dot"></span>USB camera active';
+    setAutoMode(false);
+  }
 })();
