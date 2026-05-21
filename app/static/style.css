@@ -876,6 +876,10 @@ body {
 .quality-list .ok { color: var(--success); }
 .quality-list .bad { color: var(--error); }
 
+.usb-registration-preview-frame {
+  margin-bottom: 16px;
+}
+
 .usb-register-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;

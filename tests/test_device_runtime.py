@@ -103,6 +103,39 @@ def test_runtime_stores_latest_camera_frame_for_preview():
     assert runtime.get_latest_frame_jpeg().startswith(b"\xff\xd8")
 
 
+def test_runtime_preview_capture_is_independent_from_scan_processing():
+    from app.device_runtime import DeviceRuntime
+
+    frames = [
+        np.full((2, 2, 3), 10, dtype=np.uint8),
+        np.full((2, 2, 3), 20, dtype=np.uint8),
+    ]
+
+    class FakeCamera:
+        def __init__(self):
+            self.read_count = 0
+
+        def read(self):
+            frame = frames[min(self.read_count, len(frames) - 1)]
+            self.read_count += 1
+            return frame
+
+    runtime = DeviceRuntime(
+        camera=FakeCamera(),
+        palm_processor=None,
+        db=None,
+        frame_interval_ms=1000,
+        preview_frame_interval_ms=100,
+    )
+
+    runtime.capture_preview_frame()
+    runtime.capture_preview_frame()
+
+    np.testing.assert_array_equal(runtime.latest_frame, frames[1])
+    assert runtime.camera.read_count == 2
+    assert runtime.preview_frame_interval_ms == 100
+
+
 def test_runtime_tracks_scan_state_when_no_hand_detected():
     from app.device_runtime import DeviceRuntime
 

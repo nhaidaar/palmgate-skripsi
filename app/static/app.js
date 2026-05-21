@@ -66,6 +66,7 @@ const btnStartUsbRegistration = $('btnStartUsbRegistration');
 const btnCaptureUsbSample = $('btnCaptureUsbSample');
 const btnFinalizeUsbRegistration = $('btnFinalizeUsbRegistration');
 const btnCancelUsbRegistration = $('btnCancelUsbRegistration');
+const usbRegistrationPreview = $('usbRegistrationPreview');
 
 // ── MediaPipe init ───────────────────────────────────────────────
 let handLandmarker = null;
@@ -410,6 +411,9 @@ function startUsbPreview() {
   }
 
   preview.src = '/api/device-registration/preview.mjpg';
+  if (usbRegistrationPreview) {
+    usbRegistrationPreview.src = '/api/device-registration/preview.mjpg';
+  }
   $('cameraStatus').innerHTML = '<span class="cam-dot"></span>USB camera active';
 }
 

@@ -11,6 +11,7 @@ from app.config import (
     CAMERA_DEVICE_INDEX,
     DEVICE_COOLDOWN_MS,
     DEVICE_FRAME_INTERVAL_MS,
+    DEVICE_PREVIEW_FRAME_INTERVAL_MS,
     DEVICE_HOLD_MS,
     DEVICE_STATUS_HEARTBEAT_MS,
     DUPLICATE_THRESHOLD,
@@ -48,6 +49,7 @@ class DeviceRuntime:
         hold_ms: int = DEVICE_HOLD_MS,
         cooldown_ms: int = DEVICE_COOLDOWN_MS,
         frame_interval_ms: int = DEVICE_FRAME_INTERVAL_MS,
+        preview_frame_interval_ms: int = DEVICE_PREVIEW_FRAME_INTERVAL_MS,
         heartbeat_ms: int = DEVICE_STATUS_HEARTBEAT_MS,
         threshold: float = SIMILARITY_THRESHOLD,
     ):
@@ -58,6 +60,7 @@ class DeviceRuntime:
         self.hold_ms = hold_ms
         self.cooldown_ms = cooldown_ms
         self.frame_interval_ms = frame_interval_ms
+        self.preview_frame_interval_ms = preview_frame_interval_ms
         self.heartbeat_ms = heartbeat_ms
         self.threshold = threshold
         self.hand_seen_since_ms = None
@@ -70,17 +73,27 @@ class DeviceRuntime:
         self.latest_frame = None
         self._frame_lock = threading.Lock()
         self._thread = None
+        self._preview_thread = None
         self._stop_event = threading.Event()
 
-    def _read_frame(self):
+    def capture_preview_frame(self):
         frame = self.camera.read()
         with self._frame_lock:
             self.latest_frame = frame.copy()
         return frame
 
-    def get_latest_frame_jpeg(self):
+    def _latest_frame_copy(self):
         with self._frame_lock:
-            frame = None if self.latest_frame is None else self.latest_frame.copy()
+            return None if self.latest_frame is None else self.latest_frame.copy()
+
+    def _read_frame(self):
+        frame = self._latest_frame_copy()
+        if frame is None:
+            frame = self.capture_preview_frame()
+        return frame
+
+    def get_latest_frame_jpeg(self):
+        frame = self._latest_frame_copy()
         if frame is None:
             return None
         ok, encoded = cv2.imencode(".jpg", cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
@@ -248,6 +261,21 @@ class DeviceRuntime:
         )
         return result
 
+    def _run_preview_loop(self):
+        while not self._stop_event.is_set():
+            try:
+                self.capture_preview_frame()
+            except Exception as exc:
+                self.db.upsert_device_status(
+                    worker_state="error",
+                    camera_connected=False,
+                    last_error=str(exc),
+                    fps=None,
+                    last_inference_ms=None,
+                    last_recognition_at=self.last_recognition_at,
+                )
+            time.sleep(self.preview_frame_interval_ms / 1000)
+
     def _run_loop(self):
         while not self._stop_event.is_set():
             try:
@@ -267,13 +295,17 @@ class DeviceRuntime:
         if self._thread is not None and self._thread.is_alive():
             return
         self._stop_event.clear()
+        self._preview_thread = threading.Thread(target=self._run_preview_loop, daemon=True)
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._preview_thread.start()
         self._thread.start()
 
     def stop(self):
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=2)
+        if self._preview_thread is not None:
+            self._preview_thread.join(timeout=2)
         close = getattr(self.camera, "close", None)
         if callable(close):
             close()
