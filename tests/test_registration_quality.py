@@ -88,3 +88,22 @@ def test_blurry_frame_still_blocks_capture():
 
     assert result.acceptable is False
     assert "sharpness" in result.blockers
+
+
+def test_blur_score_70_is_sharp_enough_for_usb_registration():
+    result = evaluate_guidance(
+        sample_index=0,
+        metrics={
+            "hand_detected": True,
+            "hand_clipped": False,
+            "height_ratio": 0.55,
+            "rotation_degrees": 0.0,
+            "center_x_ratio": 0.50,
+            "brightness": 120.0,
+            "blur_score": 70.0,
+            "steady": True,
+        },
+    )
+
+    assert result.acceptable is True
+    assert "sharpness" not in result.blockers
