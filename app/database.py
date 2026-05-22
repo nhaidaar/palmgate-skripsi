@@ -38,6 +38,8 @@ class Database:
                 matched_name    TEXT NOT NULL,
                 status          TEXT NOT NULL,
                 similarity      REAL NOT NULL,
+                duration_ms     INTEGER,
+                description     TEXT,
                 timestamp       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id)
             );
@@ -52,7 +54,15 @@ class Database:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
+        self._ensure_access_log_metadata_columns()
         self.conn.commit()
+
+    def _ensure_access_log_metadata_columns(self):
+        columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(access_logs)")}
+        if "duration_ms" not in columns:
+            self.conn.execute("ALTER TABLE access_logs ADD COLUMN duration_ms INTEGER")
+        if "description" not in columns:
+            self.conn.execute("ALTER TABLE access_logs ADD COLUMN description TEXT")
 
     def add_user(
         self,
@@ -135,16 +145,22 @@ class Database:
         matched_name: str,
         status: str,
         similarity: float,
+        duration_ms: int | None = None,
+        description: str | None = None,
     ):
         self.conn.execute(
-            "INSERT INTO access_logs (user_id, matched_name, status, similarity) VALUES (?, ?, ?, ?)",
-            (user_id, matched_name, status, similarity),
+            """
+            INSERT INTO access_logs (
+                user_id, matched_name, status, similarity, duration_ms, description
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, matched_name, status, similarity, duration_ms, description),
         )
         self.conn.commit()
 
     def get_access_logs(self, limit: int = 20, offset: int = 0) -> list:
         rows = self.conn.execute(
-            "SELECT id, user_id, matched_name, status, similarity, timestamp "
+            "SELECT id, user_id, matched_name, status, similarity, duration_ms, description, timestamp "
             "FROM access_logs ORDER BY timestamp DESC, id DESC LIMIT ? OFFSET ?",
             (limit, offset),
         ).fetchall()

@@ -880,7 +880,7 @@ function updateLogPagination() {
 function renderLogs(logs) {
   const tbody = $('logTableBody');
   if (!logs.length) {
-    tbody.innerHTML = `<tr class="log-empty-row"><td colspan="4"><div class="log-empty">
+    tbody.innerHTML = `<tr class="log-empty-row"><td colspan="6"><div class="log-empty">
       <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
         <path d="M8 12h24M8 20h16M8 28h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
       </svg><span>No access attempts recorded yet</span></div></td></tr>`;
@@ -894,6 +894,8 @@ function renderLogs(logs) {
       <td>${esc(log.matched_name)}</td>
       <td><span class="log-status ${ok ? 'allowed' : 'denied'}">${ok ? 'Allowed' : 'Denied'}</span></td>
       <td>${log.similarity != null ? (log.similarity * 100).toFixed(1) + '%' : '—'}</td>
+      <td>${log.duration_ms != null ? log.duration_ms + ' ms' : '—'}</td>
+      <td>${log.description ? esc(log.description) : '—'}</td>
     </tr>`;
   }).join('');
 }

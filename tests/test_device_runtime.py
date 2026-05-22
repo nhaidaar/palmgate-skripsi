@@ -51,8 +51,8 @@ def test_runtime_recognizes_after_hold_threshold():
         def get_all_embeddings(self):
             return [{"id": 1, "name": "Naufal", "embedding": np.ones(4, dtype=np.float32)}]
 
-        def add_access_log(self, user_id, matched_name, status, similarity):
-            self.logged.append((user_id, matched_name, status, similarity))
+        def add_access_log(self, user_id, matched_name, status, similarity, duration_ms=None, description=None):
+            self.logged.append((user_id, matched_name, status, similarity, duration_ms, description))
 
         def upsert_device_status(self, **kwargs):
             self.status = kwargs
@@ -72,6 +72,7 @@ def test_runtime_recognizes_after_hold_threshold():
     runtime.tick()
 
     assert runtime.db.logged[0][2] == "ALLOWED"
+    assert runtime.db.logged[0][4] == 1200
 
 
 def test_runtime_stores_latest_camera_frame_for_preview():
@@ -204,6 +205,160 @@ def test_runtime_tracks_scan_state_while_holding_detected_hand():
     assert runtime.scan_state["stage"] == "holding"
     assert runtime.scan_state["hold_elapsed_ms"] == 0
     assert runtime.scan_state["hold_required_ms"] == 1000
+
+
+def test_runtime_does_not_embed_until_hold_window_completes():
+    from app.device_runtime import DeviceRuntime
+
+    class FakeClock:
+        def __init__(self):
+            self.now_ms = 0
+
+        def now(self):
+            return self.now_ms
+
+    class FakeCamera:
+        def read(self):
+            return np.zeros((240, 320, 3), dtype=np.uint8)
+
+    class FakeProcessor:
+        def __init__(self):
+            self.embedding_calls = 0
+
+        def get_registration_guidance_metrics(self, frame, previous_metrics=None):
+            return {"hand_detected": True, "hand_clipped": False}
+
+        def get_embedding_from_notebook_frame(self, frame):
+            self.embedding_calls += 1
+            return np.ones(4, dtype=np.float32)
+
+        def compute_similarity(self, embedding, stored, threshold):
+            return {
+                "status": "DENIED",
+                "name": "Unknown",
+                "similarity": 0.5,
+                "closest_match": "Naufal",
+                "user_id": None,
+            }
+
+    class FakeDB:
+        def __init__(self):
+            self.logged = []
+
+        def get_all_embeddings(self):
+            return []
+
+        def add_access_log(self, user_id, matched_name, status, similarity, duration_ms=None, description=None):
+            self.logged.append((user_id, matched_name, status, similarity, duration_ms, description))
+
+        def upsert_device_status(self, **kwargs):
+            self.status = kwargs
+
+    processor = FakeProcessor()
+    runtime = DeviceRuntime(
+        camera=FakeCamera(),
+        palm_processor=processor,
+        db=FakeDB(),
+        clock=FakeClock(),
+        hold_ms=1000,
+    )
+
+    runtime.tick()
+    runtime.clock.now_ms = 500
+    runtime.tick()
+    assert processor.embedding_calls == 0
+    assert runtime.db.logged == []
+
+    runtime.clock.now_ms = 1000
+    runtime.tick()
+    assert processor.embedding_calls == 1
+    assert runtime.db.logged[0][5] == "similar to Naufal"
+
+
+def test_runtime_waits_for_hand_release_before_next_scan():
+    from app.device_runtime import DeviceRuntime
+
+    class FakeClock:
+        def __init__(self):
+            self.now_ms = 0
+
+        def now(self):
+            return self.now_ms
+
+    class FakeCamera:
+        def read(self):
+            return np.zeros((240, 320, 3), dtype=np.uint8)
+
+    class FakeProcessor:
+        def __init__(self):
+            self.hand_detected = True
+            self.embedding_calls = 0
+
+        def get_registration_guidance_metrics(self, frame, previous_metrics=None):
+            return {"hand_detected": self.hand_detected, "hand_clipped": False}
+
+        def get_embedding_from_notebook_frame(self, frame):
+            self.embedding_calls += 1
+            return np.ones(4, dtype=np.float32)
+
+        def compute_similarity(self, embedding, stored, threshold):
+            return {
+                "status": "ALLOWED",
+                "name": "Naufal",
+                "similarity": 0.91,
+                "closest_match": "Naufal",
+                "user_id": 1,
+            }
+
+    class FakeDB:
+        def __init__(self):
+            self.logged = []
+
+        def get_all_embeddings(self):
+            return [{"id": 1, "name": "Naufal", "embedding": np.ones(4, dtype=np.float32)}]
+
+        def add_access_log(self, user_id, matched_name, status, similarity, duration_ms=None, description=None):
+            self.logged.append((user_id, matched_name, status, similarity, duration_ms, description))
+
+        def upsert_device_status(self, **kwargs):
+            self.status = kwargs
+
+    processor = FakeProcessor()
+    runtime = DeviceRuntime(
+        camera=FakeCamera(),
+        palm_processor=processor,
+        db=FakeDB(),
+        clock=FakeClock(),
+        hold_ms=1000,
+        cooldown_ms=3000,
+    )
+
+    runtime.tick()
+    runtime.clock.now_ms = 1000
+    runtime.tick()
+    assert processor.embedding_calls == 1
+    assert len(runtime.db.logged) == 1
+
+    runtime.clock.now_ms = 5000
+    runtime.tick()
+    runtime.clock.now_ms = 6000
+    runtime.tick()
+    assert processor.embedding_calls == 1
+    assert len(runtime.db.logged) == 1
+    assert runtime.scan_state["stage"] == "waiting_for_hand_release"
+
+    processor.hand_detected = False
+    runtime.clock.now_ms = 7000
+    runtime.tick()
+    assert runtime.scan_state["stage"] == "waiting_for_hand"
+
+    processor.hand_detected = True
+    runtime.clock.now_ms = 8000
+    runtime.tick()
+    runtime.clock.now_ms = 9000
+    runtime.tick()
+    assert processor.embedding_calls == 2
+    assert len(runtime.db.logged) == 2
 
 
 def test_runtime_starts_hold_for_detected_clipped_hand():

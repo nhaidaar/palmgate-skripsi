@@ -65,6 +65,7 @@ class DeviceRuntime:
         self.heartbeat_ms = heartbeat_ms
         self.threshold = threshold
         self.hand_seen_since_ms = None
+        self.waiting_for_hand_release = False
         self.cooldown_until_ms = 0
         self.last_heartbeat_ms = None
         self.last_recognition_at = None
@@ -108,6 +109,7 @@ class DeviceRuntime:
         self.registration_session = DeviceRegistrationSession(id=str(uuid.uuid4()), name=name.strip())
         self.worker_state = "registration_active"
         self.hand_seen_since_ms = None
+        self.waiting_for_hand_release = False
         self.cooldown_until_ms = 0
         return self.registration_session
 
@@ -218,13 +220,13 @@ class DeviceRuntime:
         metrics = self.palm_processor.get_registration_guidance_metrics(frame)
         if not metrics.get("hand_detected", False):
             self.hand_seen_since_ms = None
+            self.waiting_for_hand_release = False
             self.scan_state = {"stage": "waiting_for_hand", "metrics": metrics}
             return None
 
-        embedding = self.palm_processor.get_embedding_from_notebook_frame(frame)
-        if embedding is None:
+        if self.waiting_for_hand_release:
             self.hand_seen_since_ms = None
-            self.scan_state = {"stage": "preprocessing_failed", "metrics": metrics}
+            self.scan_state = {"stage": "waiting_for_hand_release", "metrics": metrics}
             return None
 
         if self.hand_seen_since_ms is None:
@@ -248,10 +250,23 @@ class DeviceRuntime:
             return None
 
         self.scan_state = {"stage": "recognizing", "metrics": metrics}
-        result = match_embedding_and_log(self.palm_processor, self.db, embedding, self.threshold)
+        embedding = self.palm_processor.get_embedding_from_notebook_frame(frame)
+        if embedding is None:
+            self.hand_seen_since_ms = None
+            self.scan_state = {"stage": "preprocessing_failed", "metrics": metrics}
+            return None
+
+        result = match_embedding_and_log(
+            self.palm_processor,
+            self.db,
+            embedding,
+            self.threshold,
+            duration_ms=hold_elapsed_ms,
+        )
         self.last_recognition_at = str(now_ms)
         self.cooldown_until_ms = now_ms + self.cooldown_ms
         self.hand_seen_since_ms = None
+        self.waiting_for_hand_release = True
         self.scan_state = {"stage": "recognized", "result": result, "metrics": metrics}
         self.db.upsert_device_status(
             worker_state=self.worker_state,

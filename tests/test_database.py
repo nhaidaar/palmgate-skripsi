@@ -50,11 +50,20 @@ def test_delete_user(db):
 
 
 def test_add_access_log(db):
-    db.add_access_log(user_id=None, matched_name="Unknown", status="DENIED", similarity=0.3)
+    db.add_access_log(
+        user_id=None,
+        matched_name="Unknown",
+        status="DENIED",
+        similarity=0.3,
+        duration_ms=123,
+        description="similar to Naufal",
+    )
     logs = db.get_access_logs(limit=10)
     assert len(logs) == 1
     assert logs[0]["status"] == "DENIED"
     assert logs[0]["matched_name"] == "Unknown"
+    assert logs[0]["duration_ms"] == 123
+    assert logs[0]["description"] == "similar to Naufal"
 
 
 def test_delete_user_preserves_access_logs(db):
