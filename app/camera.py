@@ -2,10 +2,10 @@ import cv2
 
 
 class OpenCVCameraSource:
-    def __init__(self, device_index: int = 0):
-        self.capture = cv2.VideoCapture(device_index)
+    def __init__(self, device_source: int | str = 0):
+        self.capture = cv2.VideoCapture(device_source)
         if not self.capture.isOpened():
-            raise RuntimeError(f"Failed to open camera device {device_index}")
+            raise RuntimeError(f"Failed to open camera device {device_source}")
 
     def read(self):
         ok, frame = self.capture.read()

@@ -9,6 +9,7 @@ import numpy as np
 from app.camera import OpenCVCameraSource
 from app.config import (
     CAMERA_DEVICE_INDEX,
+    CAMERA_DEVICE_PATH,
     DEVICE_COOLDOWN_MS,
     DEVICE_FRAME_INTERVAL_MS,
     DEVICE_PREVIEW_FRAME_INTERVAL_MS,
@@ -313,7 +314,7 @@ class DeviceRuntime:
 
 
 def build_device_runtime(palm_processor, db):
-    camera = OpenCVCameraSource(CAMERA_DEVICE_INDEX)
+    camera = OpenCVCameraSource(CAMERA_DEVICE_PATH or CAMERA_DEVICE_INDEX)
     return DeviceRuntime(camera=camera, palm_processor=palm_processor, db=db)
 
 

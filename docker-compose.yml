@@ -47,12 +47,12 @@ services:
       # USB mode: use the Orange Pi USB camera for registration and recognition.
       - DEVICE_RUNTIME_ENABLED=1
       - CAMERA_SOURCE=usb
-      - CAMERA_DEVICE_INDEX=1
+      - CAMERA_DEVICE_PATH=/dev/video1
       - DEVICE_PREVIEW_FRAME_INTERVAL_MS=100
       - DEVICE_FRAME_INTERVAL_MS=500
       - NOTEBOOK_REMBG_ENABLED=0
     devices:
-      - /dev/video1:/dev/video1
+      - /dev/v4l/by-id/usb-046d_C270_HD_WEBCAM_4DEFC680-video-index0:/dev/video1
 
   cloudflared-browser:
     <<: *cloudflared-common

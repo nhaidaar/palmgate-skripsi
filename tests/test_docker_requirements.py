@@ -14,13 +14,13 @@ def test_browser_compose_disables_rembg_for_sbc_cpu_runtime():
     assert "NOTEBOOK_REMBG_ENABLED=0" in compose
 
 
-def test_usb_compose_uses_logitech_camera_device():
+def test_usb_compose_uses_logitech_camera_device_path():
     compose = Path("docker-compose.yml").read_text()
 
     assert "CAMERA_SOURCE=usb" in compose
-    assert "CAMERA_DEVICE_INDEX=1" in compose
+    assert "CAMERA_DEVICE_PATH=/dev/video1" in compose
     assert "NOTEBOOK_REMBG_ENABLED=0" in compose
-    assert "/dev/video1:/dev/video1" in compose
+    assert "/dev/v4l/by-id/usb-046d_C270_HD_WEBCAM_4DEFC680-video-index0:/dev/video1" in compose
 
 
 def test_usb_compose_uses_separate_preview_and_processing_intervals():
