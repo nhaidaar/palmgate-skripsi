@@ -1,3 +1,4 @@
+import json
 import time
 
 from fastapi import APIRouter, HTTPException, Response
@@ -76,7 +77,7 @@ def mjpeg_frames(runtime):
         frame = runtime.get_latest_frame_jpeg()
         if frame is not None:
             yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
-        time.sleep(0.2)
+        time.sleep(0.1)
 
 
 @router.get("/preview.mjpg")
@@ -112,3 +113,28 @@ async def finalize_registration():
 async def cancel_registration():
     _runtime().cancel_registration()
     return {"success": True}
+
+
+def scan_event_stream(runtime):
+    """SSE generator that yields scan events as they occur."""
+    subscriber = runtime.scan_broadcaster.subscribe()
+    try:
+        while True:
+            try:
+                event = subscriber.get(timeout=30)
+                data = json.dumps(event)
+                yield f"data: {data}\n\n"
+            except Exception:
+                yield ": keepalive\n\n"
+    finally:
+        runtime.scan_broadcaster.unsubscribe(subscriber)
+
+
+@router.get("/scan-events")
+async def scan_events():
+    """SSE endpoint for real-time scan result notifications."""
+    return StreamingResponse(
+        scan_event_stream(_runtime()),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

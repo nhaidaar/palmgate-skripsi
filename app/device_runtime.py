@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import queue
 import threading
 import time
 import uuid
@@ -40,6 +41,33 @@ class SystemClock:
         return int(time.time() * 1000)
 
 
+class ScanEventBroadcaster:
+    """Manages SSE subscribers for scan state changes."""
+
+    def __init__(self):
+        self._subscribers: list[queue.Queue] = []
+        self._lock = threading.Lock()
+
+    def subscribe(self) -> queue.Queue:
+        q = queue.Queue()
+        with self._lock:
+            self._subscribers.append(q)
+        return q
+
+    def unsubscribe(self, q: queue.Queue):
+        with self._lock:
+            if q in self._subscribers:
+                self._subscribers.remove(q)
+
+    def broadcast(self, event: dict):
+        with self._lock:
+            for q in self._subscribers:
+                try:
+                    q.put_nowait(event)
+                except queue.Full:
+                    pass
+
+
 class DeviceRuntime:
     def __init__(
         self,
@@ -65,7 +93,6 @@ class DeviceRuntime:
         self.heartbeat_ms = heartbeat_ms
         self.threshold = threshold
         self.hand_seen_since_ms = None
-        self.waiting_for_hand_release = False
         self.cooldown_until_ms = 0
         self.last_heartbeat_ms = None
         self.last_recognition_at = None
@@ -77,6 +104,7 @@ class DeviceRuntime:
         self._thread = None
         self._preview_thread = None
         self._stop_event = threading.Event()
+        self.scan_broadcaster = ScanEventBroadcaster()
 
     def capture_preview_frame(self):
         frame = self.camera.read()
@@ -109,7 +137,6 @@ class DeviceRuntime:
         self.registration_session = DeviceRegistrationSession(id=str(uuid.uuid4()), name=name.strip())
         self.worker_state = "registration_active"
         self.hand_seen_since_ms = None
-        self.waiting_for_hand_release = False
         self.cooldown_until_ms = 0
         return self.registration_session
 
@@ -220,13 +247,7 @@ class DeviceRuntime:
         metrics = self.palm_processor.get_registration_guidance_metrics(frame)
         if not metrics.get("hand_detected", False):
             self.hand_seen_since_ms = None
-            self.waiting_for_hand_release = False
             self.scan_state = {"stage": "waiting_for_hand", "metrics": metrics}
-            return None
-
-        if self.waiting_for_hand_release:
-            self.hand_seen_since_ms = None
-            self.scan_state = {"stage": "waiting_for_hand_release", "metrics": metrics}
             return None
 
         if self.hand_seen_since_ms is None:
@@ -266,8 +287,12 @@ class DeviceRuntime:
         self.last_recognition_at = str(now_ms)
         self.cooldown_until_ms = now_ms + self.cooldown_ms
         self.hand_seen_since_ms = None
-        self.waiting_for_hand_release = True
         self.scan_state = {"stage": "recognized", "result": result, "metrics": metrics}
+        self.scan_broadcaster.broadcast({
+            "stage": "recognized",
+            "result": result,
+            "timestamp": self.last_recognition_at,
+        })
         self.db.upsert_device_status(
             worker_state=self.worker_state,
             camera_connected=True,

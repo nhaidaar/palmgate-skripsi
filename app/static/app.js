@@ -37,6 +37,7 @@ const state = {
   usbRegistrationActive: false,
   usbStatusTimer: null,
   usbDeviceMode: false,
+  usbScanEventSource: null,
   capturedImages: [],   // [{ data: base64, isRoi: bool }]
   handSeenMs: 0,
   lastFrameTs: null,
@@ -415,6 +416,25 @@ function startUsbPreview() {
     usbRegistrationPreview.src = '/api/device-registration/preview.mjpg';
   }
   $('cameraStatus').innerHTML = '<span class="cam-dot"></span>USB camera active';
+}
+
+function startUsbScanEvents() {
+  if (state.usbScanEventSource) return;
+  state.usbScanEventSource = new EventSource('/api/device-registration/scan-events');
+  state.usbScanEventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.stage === 'recognized' && data.result) {
+        showResult(data.result, null);
+        updateStats(data.result.status);
+      }
+    } catch (err) {
+      console.error('[PalmAccess] SSE parse error:', err);
+    }
+  };
+  state.usbScanEventSource.onerror = () => {
+    console.warn('[PalmAccess] SSE connection lost, reconnecting...');
+  };
 }
 
 function captureFrame(videoEl) {
@@ -980,6 +1000,7 @@ const esc = (s) =>
     if (video.readyState >= 2) initMediaPipe();
   } else {
     startUsbPreview();
+    startUsbScanEvents();
     setAutoMode(false);
   }
 })();

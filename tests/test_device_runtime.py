@@ -275,7 +275,8 @@ def test_runtime_does_not_embed_until_hold_window_completes():
     assert runtime.db.logged[0][5] == "similar to Naufal"
 
 
-def test_runtime_waits_for_hand_release_before_next_scan():
+def test_runtime_scans_again_after_cooldown_with_hand_still_present():
+    """After recognition, system scans again once cooldown expires, even if hand never left."""
     from app.device_runtime import DeviceRuntime
 
     class FakeClock:
@@ -333,29 +334,26 @@ def test_runtime_waits_for_hand_release_before_next_scan():
         cooldown_ms=3000,
     )
 
+    # First scan: hold for 1000ms
     runtime.tick()
     runtime.clock.now_ms = 1000
     runtime.tick()
     assert processor.embedding_calls == 1
     assert len(runtime.db.logged) == 1
 
-    runtime.clock.now_ms = 5000
-    runtime.tick()
-    runtime.clock.now_ms = 6000
+    # During cooldown (3000ms), no new scan even with hand present
+    runtime.clock.now_ms = 2000
     runtime.tick()
     assert processor.embedding_calls == 1
-    assert len(runtime.db.logged) == 1
-    assert runtime.scan_state["stage"] == "waiting_for_hand_release"
+    assert runtime.scan_state["stage"] == "cooldown"
 
-    processor.hand_detected = False
-    runtime.clock.now_ms = 7000
+    # After cooldown expires, hand still present — should start new hold
+    runtime.clock.now_ms = 5000
     runtime.tick()
-    assert runtime.scan_state["stage"] == "waiting_for_hand"
+    assert runtime.scan_state["stage"] == "holding"
 
-    processor.hand_detected = True
-    runtime.clock.now_ms = 8000
-    runtime.tick()
-    runtime.clock.now_ms = 9000
+    # Complete second hold — should scan again
+    runtime.clock.now_ms = 6000
     runtime.tick()
     assert processor.embedding_calls == 2
     assert len(runtime.db.logged) == 2
