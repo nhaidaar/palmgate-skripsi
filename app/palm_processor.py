@@ -254,6 +254,21 @@ class PalmProcessor:
         min_x, max_x = min(xs), max(xs)
         min_y, max_y = min(ys), max(ys)
 
+        h, w = gray.shape[:2]
+        pad_x = int((max_x - min_x) * w * 0.12)
+        pad_y = int((max_y - min_y) * h * 0.12)
+        x1 = max(0, int(min_x * w) - pad_x)
+        y1 = max(0, int(min_y * h) - pad_y)
+        x2 = min(w, int(max_x * w) + pad_x)
+        y2 = min(h, int(max_y * h) + pad_y)
+        hand_gray = gray[y1:y2, x1:x2]
+        if hand_gray.size:
+            brightness = float(hand_gray.mean())
+            blur_score = float(cv2.Laplacian(hand_gray, cv2.CV_64F).var())
+        else:
+            brightness = base["brightness"]
+            blur_score = base["blur_score"]
+
         index_mcp = landmarks[INDEX_FINGER_MCP]
         pinky_mcp = landmarks[PINKY_MCP]
         rotation_degrees = float(
@@ -266,8 +281,8 @@ class PalmProcessor:
             "height_ratio": float(max_y - min_y),
             "rotation_degrees": rotation_degrees,
             "center_x_ratio": float((min_x + max_x) / 2),
-            "brightness": base["brightness"],
-            "blur_score": base["blur_score"],
+            "brightness": brightness,
+            "blur_score": blur_score,
             "steady": False,
         }
         if previous_metrics and previous_metrics.get("hand_detected"):

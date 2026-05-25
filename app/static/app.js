@@ -919,7 +919,13 @@ function renderQualityList(guidance) {
     const blocking = blockers.has(key);
     const status = ok ? 'OK' : (blocking ? 'Fix' : 'Adjust');
     const cls = ok ? 'ok' : (blocking ? 'bad' : 'warn');
-    return `<li><span>${label} <em>${type}</em></span><strong class="${cls}">${status}</strong></li>`;
+    let detail = '';
+    if (key === 'sharpness' && guidance.metrics?.blur_score != null) {
+      detail = ` (${guidance.metrics.blur_score.toFixed(0)})`;
+    } else if (key === 'brightness' && guidance.metrics?.brightness != null) {
+      detail = ` (${guidance.metrics.brightness.toFixed(0)})`;
+    }
+    return `<li><span>${label}${detail} <em>${type}</em></span><strong class="${cls}">${status}</strong></li>`;
   }).join('');
 }
 
