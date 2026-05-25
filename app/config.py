@@ -22,6 +22,7 @@ DEVICE_HOLD_MS = int(os.getenv("DEVICE_HOLD_MS", "1200"))
 DEVICE_COOLDOWN_MS = int(os.getenv("DEVICE_COOLDOWN_MS", "3000"))
 DEVICE_STATUS_HEARTBEAT_MS = int(os.getenv("DEVICE_STATUS_HEARTBEAT_MS", "1000"))
 NOTEBOOK_REMBG_ENABLED = os.getenv("NOTEBOOK_REMBG_ENABLED", "1") == "1"
+NOTEBOOK_REMBG_MODEL = os.getenv("NOTEBOOK_REMBG_MODEL", "u2net")
 
 SIMILARITY_THRESHOLD = 0.75
 DUPLICATE_THRESHOLD  = 0.75   # block registration if palm already matches at this level

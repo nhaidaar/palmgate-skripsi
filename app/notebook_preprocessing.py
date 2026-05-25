@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from app.config import CLAHE_CLIP_LIMIT, CLAHE_TILE_GRID, IMG_SIZE
+from app.config import CLAHE_CLIP_LIMIT, CLAHE_TILE_GRID, IMG_SIZE, NOTEBOOK_REMBG_MODEL
 
 
 @dataclass(frozen=True)
@@ -17,12 +17,24 @@ class NotebookPreprocessResult:
 
 
 class NotebookPreprocessor:
-    def __init__(self, rembg_enabled: bool = True):
+    def __init__(self, rembg_enabled: bool = True, rembg_model: str = NOTEBOOK_REMBG_MODEL):
         self.rembg_enabled = rembg_enabled
+        self.rembg_model = rembg_model
+        self._rembg_session = None
         self.clahe = cv2.createCLAHE(
             clipLimit=CLAHE_CLIP_LIMIT,
             tileGridSize=CLAHE_TILE_GRID,
         )
+
+    def _get_rembg_session(self):
+        if self._rembg_session is None:
+            from rembg import new_session
+
+            self._rembg_session = new_session(
+                self.rembg_model,
+                providers=["CPUExecutionProvider"],
+            )
+        return self._rembg_session
 
     def preprocess_roi_to_model_input(self, roi: np.ndarray) -> np.ndarray:
         if roi.ndim == 3:
@@ -40,7 +52,7 @@ class NotebookPreprocessor:
             from PIL import Image
             from rembg import remove
 
-            output = np.array(remove(Image.fromarray(resized)))
+            output = np.array(remove(Image.fromarray(resized), session=self._get_rembg_session()))
             if output.ndim == 3 and output.shape[2] == 4:
                 alpha = output[:, :, 3]
                 rgb = output[:, :, :3]
