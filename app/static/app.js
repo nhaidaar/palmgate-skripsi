@@ -3,8 +3,8 @@
    Browser-side: MediaPipe hand detection + client ROI crop
 ================================================================ */
 
-import { HandLandmarker, FilesetResolver, DrawingUtils }
-  from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
+// MediaPipe imports - loaded dynamically to avoid blocking if CDN fails
+let HandLandmarker, FilesetResolver, DrawingUtils;
 
 // ── Timing constants ─────────────────────────────────────────────
 const SCAN_HOLD_MS     = 800;    // hold steady before auto-scan triggers
@@ -75,6 +75,12 @@ let drawUtils      = null;
 
 async function initMediaPipe() {
   try {
+    // Dynamic import to avoid blocking page load if CDN fails
+    const mediapipe = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
+    HandLandmarker = mediapipe.HandLandmarker;
+    FilesetResolver = mediapipe.FilesetResolver;
+    DrawingUtils = mediapipe.DrawingUtils;
+
     const vision = await FilesetResolver.forVisionTasks(
       'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
     );
@@ -93,12 +99,14 @@ async function initMediaPipe() {
 
     drawUtils = new DrawingUtils(overlayCanvas.getContext('2d'));
     console.log('[PalmAccess] MediaPipe HandLandmarker ready');
-    $('cameraStatus').innerHTML = '<span class="cam-dot"></span>Ready';
+    const cameraStatus = $('cameraStatus');
+    if (cameraStatus) cameraStatus.innerHTML = '<span class="cam-dot"></span>Ready';
     startDetectLoop();
   } catch (err) {
     console.warn('[PalmAccess] MediaPipe failed — falling back to manual mode', err);
     setAutoMode(false);
-    $('cameraStatus').textContent = 'Manual mode';
+    const cameraStatus = $('cameraStatus');
+    if (cameraStatus) cameraStatus.textContent = 'Manual mode';
   }
 }
 
@@ -163,6 +171,7 @@ function drawLandmarks(result, cvs) {
   ctx.clearRect(0, 0, cvs.width, cvs.height);
 
   if (!result.landmarks || !result.landmarks.length) return;
+  if (!HandLandmarker || !DrawingUtils) return;
 
   const du = new DrawingUtils(ctx);
   for (const lm of result.landmarks) {
@@ -1131,32 +1140,35 @@ const esc = (s) =>
 
 // ── Init ─────────────────────────────────────────────────────────
 (async () => {
-  loadStats();
-  await loadStatus();
-  setInterval(loadStatus, 5000);
+  try {
+    loadStats();
+    await loadStatus();
+    setInterval(loadStatus, 5000);
 
-  if (!state.usbDeviceMode) {
-    // Browser mode: use webcam for both scan and registration
-    await startCamera();
-    video.addEventListener('loadeddata', () => initMediaPipe(), { once: true });
-    if (video.readyState >= 2) initMediaPipe();
-    // Show browser video in registration, hide USB preview
-    videoReg.style.display = 'block';
-    if (usbRegistrationPreview) usbRegistrationPreview.style.display = 'none';
-  } else {
-    // USB mode: use MJPEG stream for both scan and registration
-    startUsbPreview();
-    startUsbScanEvents();
-    setAutoMode(false);
-    // Show USB preview in registration, hide browser video
-    videoReg.style.display = 'none';
-    if (usbRegistrationPreview) {
-      usbRegistrationPreview.style.display = 'block';
-      usbRegistrationPreview.src = '/api/device-registration/preview.mjpg';
+    if (!state.usbDeviceMode) {
+      // Browser mode: use webcam for both scan and registration
+      await startCamera();
+      video.addEventListener('loadeddata', () => initMediaPipe(), { once: true });
+      if (video.readyState >= 2) initMediaPipe();
+      // Show browser video in registration, hide USB preview
+      if (videoReg) videoReg.style.display = 'block';
+      if (usbRegistrationPreview) usbRegistrationPreview.style.display = 'none';
+    } else {
+      // USB mode: use MJPEG stream for both scan and registration
+      startUsbPreview();
+      startUsbScanEvents();
+      setAutoMode(false);
+      // Show USB preview in registration, hide browser video
+      if (videoReg) videoReg.style.display = 'none';
+      if (usbRegistrationPreview) {
+        usbRegistrationPreview.style.display = 'block';
+        usbRegistrationPreview.src = '/api/device-registration/preview.mjpg';
+      }
     }
-  }
 
-  // Initialize registration UI
-  updateRegistrationUI();
-})()
+    // Initialize registration UI
+    updateRegistrationUI();
+  } catch (err) {
+    console.error('[PalmAccess] Init error:', err);
+  }
 })();
