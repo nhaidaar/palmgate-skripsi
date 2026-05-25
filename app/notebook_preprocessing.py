@@ -76,9 +76,20 @@ class NotebookPreprocessor:
     def _calculate_roi(
         self,
         hand_mask: np.ndarray,
+        gray_image: np.ndarray,
         contour,
         low_freq: int = 50,
+        padding: int = 80,
     ) -> tuple[np.ndarray, tuple[int, int, int, int], float] | None:
+        gray_padded = cv2.copyMakeBorder(
+            gray_image,
+            top=padding,
+            bottom=padding,
+            left=padding,
+            right=padding,
+            borderType=cv2.BORDER_CONSTANT,
+            value=0,
+        )
         moments = cv2.moments(hand_mask)
         if moments["m00"] == 0:
             return None
@@ -124,7 +135,7 @@ class NotebookPreprocessor:
         rotation_degrees = float(np.degrees(theta))
         rotation = cv2.getRotationMatrix2D(center, rotation_degrees, 1.0)
         h, w = hand_mask.shape[:2]
-        rotated = cv2.warpAffine(hand_mask, rotation, (w, h))
+        rotated_gray = cv2.warpAffine(gray_image, rotation, (w, h))
 
         v1_r = (np.dot(rotation[:, :2], v1) + rotation[:, 2]).astype(int)
         v2_r = (np.dot(rotation[:, :2], v2) + rotation[:, 2]).astype(int)
@@ -148,7 +159,7 @@ class NotebookPreprocessor:
 
         ux, uy = max(0, ux), max(0, uy)
         lx, ly = min(w, lx), min(h, ly)
-        roi = rotated[uy:ly, ux:lx]
+        roi = rotated_gray[uy:ly, ux:lx]
         if roi.size == 0:
             return None
         return roi, (ux, uy, lx, ly), rotation_degrees
@@ -163,7 +174,7 @@ class NotebookPreprocessor:
         if contour is None:
             return None
 
-        calculated = self._calculate_roi(mask, contour)
+        calculated = self._calculate_roi(mask, gray, contour)
         if calculated is None:
             return None
 

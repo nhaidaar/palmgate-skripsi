@@ -8,6 +8,7 @@ from app.config import SIMILARITY_THRESHOLD, USB_REGISTRATION_STORE_EMBEDDINGS
 from app.services.registration_ranking import RegistrationSample, rank_registration_samples
 
 SEED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+MAX_ROTATION_DEGREES = 15.0  # Only accept images with rotation within ±15°
 
 
 @dataclass(frozen=True)
@@ -116,25 +117,40 @@ def build_seed_embedding_from_frames(
     frames_rgb: list[np.ndarray],
     palm_processor,
     preprocessor,
+    max_rotation: float = MAX_ROTATION_DEGREES,
 ) -> SeedEmbeddingResult:
-    samples = []
+    """Build embedding from multiple frames, filtering by rotation consistency.
+
+    Only accepts frames where the detected palm rotation is within ±max_rotation degrees.
+    This ensures consistent ROI extraction across enrollment images.
+    """
+    valid_extractions = []
     for index, frame_rgb in enumerate(frames_rgb):
         extracted = preprocessor.extract_full_hand_roi(frame_rgb)
         if extracted is None:
             continue
+        if abs(extracted.rotation_degrees) > max_rotation:
+            continue
+        valid_extractions.append((index, extracted))
+
+    if not valid_extractions:
+        raise RuntimeError(
+            f"No valid seed captures with rotation within ±{max_rotation}°. "
+            "Ensure enrollment images have palm roughly vertical."
+        )
+
+    samples = []
+    for index, extracted in valid_extractions:
         processed = preprocessor.preprocess_roi_to_model_input(extracted.roi)
         embedding = palm_processor._run_inference(processed).astype(np.float32)
         samples.append(RegistrationSample(index, 1.0, embedding))
-
-    if not samples:
-        raise RuntimeError("No valid seed captures")
 
     embeddings = [sample.embedding.astype(np.float32) for sample in samples]
     average = np.mean(embeddings, axis=0).astype(np.float32)
     return SeedEmbeddingResult(
         embedding=average,
         individual_embeddings=embeddings,
-        variant_count=len(samples),
+        variant_count=len(frames_rgb),
         selected_count=len(samples),
     )
 
