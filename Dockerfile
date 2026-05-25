@@ -49,5 +49,6 @@ EXPOSE 8000
 # DB_PATH is overridden by docker-compose so the DB lands on the volume,
 # not inside the container's writable layer.
 ENV DB_PATH=/data/palmprint.db
+ENV ORT_LOG_SEVERITY_LEVEL=3
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

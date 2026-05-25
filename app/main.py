@@ -1,3 +1,5 @@
+import logging
+import threading
 import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -11,6 +13,8 @@ from app.device_runtime import build_device_runtime
 from app.palm_processor import PalmProcessor
 from app.routes import recognize, register, users, logs, debug, status, device_registration
 
+log = logging.getLogger("palmgate")
+
 db: Database = None
 palm_processor: PalmProcessor = None
 device_runtime = None
@@ -21,12 +25,21 @@ device_runtime = None
 _BUILD_TS = str(int(time.time()))
 
 
+def _warmup_usb_preprocessing():
+    try:
+        palm_processor.warmup_notebook_preprocessor()
+        log.info("USB preprocessing warmup complete")
+    except Exception as exc:
+        log.warning("USB preprocessing warmup failed: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global db, palm_processor, device_runtime
     db = Database(DB_PATH)
     palm_processor = PalmProcessor(MODEL_PATH)
     if DEVICE_RUNTIME_ENABLED and CAMERA_SOURCE == "usb":
+        threading.Thread(target=_warmup_usb_preprocessing, daemon=True).start()
         device_runtime = build_device_runtime(palm_processor, db)
         device_runtime.start()
     yield

@@ -61,6 +61,10 @@ class PalmProcessor:
         )
         self._hand_landmarker = mp_vision.HandLandmarker.create_from_options(options)
 
+    def warmup_notebook_preprocessor(self):
+        if self.notebook_preprocessor.rembg_enabled:
+            self.notebook_preprocessor._get_rembg_session()
+
     def _load_model(self, model_path):
         kwargs = {"model_path": str(model_path), "experimental_preserve_all_tensors": True}
         try:
