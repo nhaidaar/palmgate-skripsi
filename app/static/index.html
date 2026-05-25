@@ -208,12 +208,59 @@
 
     <!-- ==================== REGISTER PANEL ==================== -->
     <section class="panel" id="panel-register">
-      <div class="register-layout">
+      <div class="register-layout unified">
+
+        <div class="register-camera-col">
+          <div class="camera-frame reg-camera" id="regCameraFrame">
+            <!-- Browser camera video (hidden in USB mode) -->
+            <video id="videoReg" autoplay playsinline muted></video>
+            <!-- USB camera preview (hidden in browser mode) -->
+            <img id="usbRegistrationPreview" class="usb-preview" alt="USB camera preview" style="display:none;" />
+
+            <canvas id="overlayCanvasReg" class="overlay-canvas"></canvas>
+
+            <!-- Hand position guide overlay -->
+            <svg class="hand-guide-overlay" id="handGuideOverlay" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
+              <!-- Target size ring -->
+              <circle class="guide-size-ring" id="guideSizeRing" cx="50" cy="50" r="35" fill="none" stroke-width="2" stroke-dasharray="4 2"/>
+              <!-- Center crosshair -->
+              <line class="guide-crosshair" id="guideCrossH" x1="45" y1="50" x2="55" y2="50" stroke-width="1"/>
+              <line class="guide-crosshair" id="guideCrossV" x1="50" y1="45" x2="50" y2="55" stroke-width="1"/>
+              <!-- Rotation indicator arc -->
+              <path class="guide-rotation-arc" id="guideRotationArc" d="" fill="none" stroke-width="2"/>
+            </svg>
+
+            <!-- Auto-scan countdown ring -->
+            <div class="autoscan-ring" id="autoscanRingReg" style="display:none;">
+              <svg viewBox="0 0 100 100" class="ring-svg">
+                <circle class="ring-track" cx="50" cy="50" r="42"/>
+                <circle class="ring-fill" cx="50" cy="50" r="42" id="ringFillReg"/>
+              </svg>
+              <span class="ring-label" id="ringLabelReg">Hold</span>
+            </div>
+
+            <!-- Palm guide (fallback when no metrics) -->
+            <div class="palm-guide" id="palmGuideReg">
+              <div class="guide-ring outer"></div>
+              <div class="guide-label">Align palm</div>
+            </div>
+
+            <div class="capture-flash" id="captureFlashReg"></div>
+            <div class="brightness-badge" id="brightnessBadgeReg" style="display:none;"></div>
+          </div>
+
+          <!-- Guidance metrics display -->
+          <div class="guidance-metrics" id="guidanceMetrics">
+            <div class="metric-item" id="metricSize"><span class="metric-icon">↕</span> Size: <strong>--</strong></div>
+            <div class="metric-item" id="metricRotation"><span class="metric-icon">↺</span> Rotation: <strong>--</strong></div>
+            <div class="metric-item" id="metricPosition"><span class="metric-icon">↔</span> Position: <strong>--</strong></div>
+          </div>
+        </div>
 
         <div class="register-form-col">
-          <div class="form-block usb-registration-panel">
-            <h2 class="form-title">Register with USB camera</h2>
-            <p class="form-desc">Use the Orange Pi USB camera for official enrollment. Follow 7 guided poses, then PalmGate stores the best 5 samples.</p>
+          <div class="form-block">
+            <h2 class="form-title">Register new user</h2>
+            <p class="form-desc">Follow 7 guided poses to enroll. PalmGate stores the best 5 samples for reliable recognition.</p>
 
             <div class="field-group">
               <label class="field-label" for="userName">Full name</label>
@@ -227,102 +274,37 @@
               />
             </div>
 
-            <div class="camera-frame usb-registration-preview-frame" id="usbRegistrationCameraFrame">
-              <img id="usbRegistrationPreview" class="usb-preview" alt="USB camera preview" />
-              <div class="palm-guide">
-                <div class="guide-ring outer"></div>
-                <div class="guide-label">Position palm here</div>
-              </div>
-            </div>
-
-            <div class="usb-registration-status" id="usbRegistrationStatus">
-              <div class="sample-title" id="usbSampleTitle">Sample 1/7: Center palm</div>
-              <div class="sample-desc" id="usbSampleDesc">Palm centered, vertical, fills about 55% of the frame.</div>
+            <div class="registration-status" id="registrationStatus">
+              <div class="sample-title" id="regSampleTitle">Sample 1/7: Center palm</div>
+              <div class="sample-desc" id="regSampleDesc">Palm centered, vertical, fills about 55% of the frame.</div>
               <div class="capture-counter-inline">Samples captured: <strong id="captureCounter">0 / 7</strong></div>
-              <ul class="quality-list" id="usbQualityList">
-                <li><span>Status</span><strong class="bad">Waiting for USB registration</strong></li>
-              </ul>
-            </div>
-
-            <div class="register-hint" id="registerHint">
-              Enter a name, start USB registration, then capture each guided sample when the frame is acceptable.
-            </div>
-
-            <div class="register-actions usb-register-actions">
-              <button class="btn btn-primary" id="btnStartUsbRegistration">Start USB registration</button>
-              <button class="btn btn-secondary" id="btnCaptureUsbSample" disabled>Capture sample</button>
-              <button class="btn btn-primary" id="btnFinalizeUsbRegistration" disabled>Finalize registration</button>
-              <button class="btn btn-ghost" id="btnCancelUsbRegistration" disabled>Cancel</button>
-            </div>
-
-            <div class="register-feedback" id="registerFeedback"></div>
-          </div>
-        </div>
-
-        <div class="register-form-col">
-          <details class="advanced-register" id="browserRegistrationFallback">
-            <summary>Browser camera registration for testing</summary>
-            <p class="form-desc">Testing only. Users enrolled from the browser camera may be less reliable on the USB device.</p>
-
-            <div class="register-camera-col">
-              <div class="camera-frame reg-camera" id="regCameraFrame">
-                <video id="videoReg" autoplay playsinline muted></video>
-                <canvas id="overlayCanvasReg" class="overlay-canvas"></canvas>
-
-                <div class="autoscan-ring" id="autoscanRingReg" style="display:none;">
-                  <svg viewBox="0 0 100 100" class="ring-svg">
-                    <circle class="ring-track" cx="50" cy="50" r="42"/>
-                    <circle class="ring-fill"  cx="50" cy="50" r="42" id="ringFillReg"/>
-                  </svg>
-                  <span class="ring-label" id="ringLabelReg">Hold</span>
-                </div>
-
-                <div class="palm-guide" id="palmGuideReg">
-                  <div class="guide-ring outer"></div>
-                  <div class="guide-label">Align palm</div>
-                </div>
-
-                <div class="capture-flash" id="captureFlashReg"></div>
-                <div class="brightness-badge" id="brightnessBadgeReg" style="display:none;"></div>
-                <div class="capture-counter" id="browserCaptureCounter">0 / 5</div>
-              </div>
-
-              <button class="btn btn-secondary btn-capture" id="btnCapture">
-                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                  <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.5"/>
-                  <circle cx="9" cy="9" r="3" fill="currentColor"/>
-                </svg>
-                Capture browser sample
-              </button>
-            </div>
-
-            <div class="captures-row">
-              <span class="captures-label">Browser samples captured</span>
               <div class="capture-dots" id="captureDots">
                 <span class="dot" data-i="0"></span>
                 <span class="dot" data-i="1"></span>
                 <span class="dot" data-i="2"></span>
                 <span class="dot" data-i="3"></span>
                 <span class="dot" data-i="4"></span>
+                <span class="dot" data-i="5"></span>
+                <span class="dot" data-i="6"></span>
               </div>
+              <ul class="quality-list" id="qualityList">
+                <li><span>Status</span><strong class="neutral">Enter name to start</strong></li>
+              </ul>
+            </div>
+
+            <div class="register-hint" id="registerHint">
+              Enter a name, then start registration to capture 7 guided samples.
             </div>
 
             <div class="register-actions">
-              <button class="btn btn-primary btn-register" id="btnRegister" disabled>
-                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                  <path d="M3 9l4 4 8-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                Register browser samples
-              </button>
-              <button class="btn btn-ghost btn-reset-captures" id="btnReset" disabled aria-label="Clear all captured samples and start over">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <path d="M2 8a6 6 0 1 0 1.5-3.9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                  <path d="M2 4v4h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                Reset
-              </button>
+              <button class="btn btn-primary" id="btnStartRegistration">Start registration</button>
+              <button class="btn btn-secondary" id="btnCaptureSample" disabled>Capture sample</button>
+              <button class="btn btn-primary" id="btnFinalizeRegistration" disabled>Finalize</button>
+              <button class="btn btn-ghost" id="btnCancelRegistration" disabled>Cancel</button>
             </div>
-          </details>
+
+            <div class="register-feedback" id="registerFeedback"></div>
+          </div>
         </div>
 
       </div>

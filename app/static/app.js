@@ -33,18 +33,20 @@ const state = {
   stream: null,
   currentTab: 'scan',
   autoMode: true,
-  registrationMode: 'usb',
-  usbRegistrationActive: false,
-  usbStatusTimer: null,
   usbDeviceMode: false,
   usbScanEventSource: null,
-  capturedImages: [],   // [{ data: base64, isRoi: bool }]
+  // Registration state
+  registrationActive: false,
+  registrationStatusTimer: null,
+  capturedSamples: [],
+  currentSampleIndex: 0,
+  lastGuidance: null,
+  // Scan state
   handSeenMs: 0,
   lastFrameTs: null,
-  lastLandmarks: null,  // most recent mediapipe landmarks for ROI extraction
+  lastLandmarks: null,
   scanBusy: false,
   scanCooldownUntil: 0,
-  regCooldownUntil: 0,
   scanStats: { total: 0, allowed: 0, denied: 0, users: 0 },
 };
 
@@ -58,16 +60,14 @@ const overlayCanvas    = $('overlayCanvas');
 const overlayCanvasReg = $('overlayCanvasReg');
 const btnScan          = $('btnScan');
 const btnMode          = $('btnMode');
-const btnCapture       = $('btnCapture');
-const btnRegister      = $('btnRegister');
 const btnRefresh       = $('btnRefresh');
-const btnReset         = $('btnReset');
 const userName         = $('userName');
-const btnStartUsbRegistration = $('btnStartUsbRegistration');
-const btnCaptureUsbSample = $('btnCaptureUsbSample');
-const btnFinalizeUsbRegistration = $('btnFinalizeUsbRegistration');
-const btnCancelUsbRegistration = $('btnCancelUsbRegistration');
 const usbRegistrationPreview = $('usbRegistrationPreview');
+// Unified registration buttons
+const btnStartRegistration = $('btnStartRegistration');
+const btnCaptureSample = $('btnCaptureSample');
+const btnFinalizeRegistration = $('btnFinalizeRegistration');
+const btnCancelRegistration = $('btnCancelRegistration');
 
 // ── MediaPipe init ───────────────────────────────────────────────
 let handLandmarker = null;
@@ -328,19 +328,9 @@ function updateRingProgress() {
   }
 
   if (tab === 'register') {
-    const holdMs = REG_HOLD_MS;
-    const ring   = $('autoscanRingReg');
-    const fill   = $('ringFillReg');
-    const label  = $('ringLabelReg');
-    const pct    = Math.min(state.handSeenMs / holdMs, 1);
-
-    if (state.registrationMode === 'browser' && state.handSeenMs > 20 && state.capturedImages.length < 5 && Date.now() >= state.regCooldownUntil) {
-      ring.style.display = 'block';
-      fill.style.strokeDashoffset = RING_C * (1 - pct);
-      label.textContent = pct >= 1 ? '✓' : 'Hold';
-    } else {
-      ring.style.display = 'none';
-    }
+    // Registration ring is handled by the registration status polling
+    // Hide the ring when not in browser mode with active registration
+    $('autoscanRingReg').style.display = 'none';
   }
 }
 
@@ -356,19 +346,7 @@ function runAutoLogic() {
     }
   }
 
-  if (state.currentTab === 'register' && state.registrationMode === 'browser') {
-    const hasName = userName.value.trim().length > 0;
-    if (
-      state.handSeenMs >= REG_HOLD_MS &&
-      state.capturedImages.length < 5 &&
-      now >= state.regCooldownUntil &&
-      hasName
-    ) {
-      triggerCapture();
-      state.regCooldownUntil = now + REG_COOLDOWN_MS;
-      state.handSeenMs = 0;
-    }
-  }
+  // Registration auto-capture is handled by the registration status polling
 }
 
 // ── Camera hand-detected visual state ────────────────────────────
@@ -595,53 +573,72 @@ function updateStats(status) {
   $('statDenied').textContent  = state.scanStats.denied;
 }
 
-// ── USB registration ─────────────────────────────────────────────
-btnStartUsbRegistration?.addEventListener('click', async () => {
+// ── Unified Registration ─────────────────────────────────────────
+// Sample targets matching server-side SAMPLE_TARGETS
+const SAMPLE_TARGETS = [
+  { key: 'center', label: 'Center palm', minHeight: 0.50, maxHeight: 0.60, minRot: -5, maxRot: 5, minCx: 0.40, maxCx: 0.60 },
+  { key: 'closer', label: 'Move closer', minHeight: 0.65, maxHeight: 0.75, minRot: -5, maxRot: 5, minCx: 0.40, maxCx: 0.60 },
+  { key: 'farther', label: 'Move farther', minHeight: 0.38, maxHeight: 0.48, minRot: -5, maxRot: 5, minCx: 0.40, maxCx: 0.60 },
+  { key: 'rotate_left', label: 'Rotate left', minHeight: 0.50, maxHeight: 0.60, minRot: -15, maxRot: -8, minCx: 0.40, maxCx: 0.60 },
+  { key: 'rotate_right', label: 'Rotate right', minHeight: 0.50, maxHeight: 0.60, minRot: 8, maxRot: 15, minCx: 0.40, maxCx: 0.60 },
+  { key: 'shift_left', label: 'Shift left', minHeight: 0.50, maxHeight: 0.60, minRot: -5, maxRot: 5, minCx: 0.30, maxCx: 0.40 },
+  { key: 'shift_right', label: 'Shift right', minHeight: 0.50, maxHeight: 0.60, minRot: -5, maxRot: 5, minCx: 0.60, maxCx: 0.70 },
+];
+
+btnStartRegistration?.addEventListener('click', async () => {
   const name = userName.value.trim();
   if (!name) return setFeedback('Name is required', 'error');
-  const result = await startUsbRegistration(name);
-  if (result.detail) return setFeedback(result.detail, 'error');
-  state.usbRegistrationActive = true;
-  setFeedback('USB registration started.', 'success');
-  startUsbStatusPolling();
-  await refreshUsbRegistrationStatus();
+
+  if (state.usbDeviceMode) {
+    const result = await apiStartRegistration(name);
+    if (result.detail) return setFeedback(result.detail, 'error');
+  }
+
+  state.registrationActive = true;
+  state.capturedSamples = [];
+  state.currentSampleIndex = 0;
+  setFeedback('Registration started. Follow the guided poses.', 'success');
+  startRegistrationStatusPolling();
+  updateRegistrationUI();
 });
 
-btnCaptureUsbSample?.addEventListener('click', async () => {
-  const result = await captureUsbSample();
-  if (result.detail) return setFeedback(result.detail, 'error');
-  triggerFlash('captureFlashReg');
-  setFeedback(`Captured sample ${result.sample_index + 1}.`, 'success');
-  await refreshUsbRegistrationStatus();
+btnCaptureSample?.addEventListener('click', async () => {
+  if (!state.registrationActive) return;
+
+  if (state.usbDeviceMode) {
+    const result = await apiCaptureSample();
+    if (result.detail) return setFeedback(result.detail, 'error');
+    triggerFlash('captureFlashReg');
+    setFeedback(`Captured sample ${result.sample_index + 1}.`, 'success');
+    await refreshRegistrationStatus();
+  } else {
+    captureBrowserSample();
+  }
 });
 
-btnFinalizeUsbRegistration?.addEventListener('click', async () => {
-  const result = await finalizeUsbRegistration();
-  if (result.detail) return setFeedback(result.detail, 'error');
-  setFeedback(`✓ ${result.name} enrolled successfully`, 'success');
-  state.usbRegistrationActive = false;
-  stopUsbStatusPolling();
-  renderUsbRegistrationStatus({ active: false, captured_count: 0 });
-  userName.value = '';
+btnFinalizeRegistration?.addEventListener('click', async () => {
+  if (state.usbDeviceMode) {
+    const result = await apiFinalizeRegistration();
+    if (result.detail) return setFeedback(result.detail, 'error');
+    setFeedback(`✓ ${result.name} enrolled successfully`, 'success');
+  } else {
+    await finalizeBrowserRegistration();
+  }
+  resetRegistration();
   await loadUsers();
   await loadStats();
 });
 
-btnCancelUsbRegistration?.addEventListener('click', async () => {
-  await cancelUsbRegistration();
-  state.usbRegistrationActive = false;
-  stopUsbStatusPolling();
-  setFeedback('USB registration cancelled.', '');
-  renderUsbRegistrationStatus({ active: false, captured_count: 0 });
+btnCancelRegistration?.addEventListener('click', async () => {
+  if (state.usbDeviceMode) {
+    await apiCancelRegistration();
+  }
+  resetRegistration();
+  setFeedback('Registration cancelled.', '');
 });
 
-$('browserRegistrationFallback')?.addEventListener('toggle', (event) => {
-  state.registrationMode = event.target.open ? 'browser' : 'usb';
-  state.handSeenMs = 0;
-  $('autoscanRingReg').style.display = 'none';
-});
-
-async function startUsbRegistration(name) {
+// API calls for USB mode
+async function apiStartRegistration(name) {
   const res = await fetch('/api/device-registration/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -650,62 +647,205 @@ async function startUsbRegistration(name) {
   return await res.json();
 }
 
-async function getUsbRegistrationStatus() {
+async function apiGetRegistrationStatus() {
   const res = await fetch('/api/device-registration/status');
   return await res.json();
 }
 
-async function captureUsbSample() {
+async function apiCaptureSample() {
   const res = await fetch('/api/device-registration/capture', { method: 'POST' });
   return await res.json();
 }
 
-async function finalizeUsbRegistration() {
+async function apiFinalizeRegistration() {
   const res = await fetch('/api/device-registration/finalize', { method: 'POST' });
   return await res.json();
 }
 
-async function cancelUsbRegistration() {
+async function apiCancelRegistration() {
   const res = await fetch('/api/device-registration/cancel', { method: 'POST' });
   return await res.json();
 }
 
-function startUsbStatusPolling() {
-  stopUsbStatusPolling();
-  state.usbStatusTimer = setInterval(refreshUsbRegistrationStatus, 1000);
+function startRegistrationStatusPolling() {
+  stopRegistrationStatusPolling();
+  state.registrationStatusTimer = setInterval(refreshRegistrationStatus, 500);
 }
 
-function stopUsbStatusPolling() {
-  if (state.usbStatusTimer) clearInterval(state.usbStatusTimer);
-  state.usbStatusTimer = null;
+function stopRegistrationStatusPolling() {
+  if (state.registrationStatusTimer) clearInterval(state.registrationStatusTimer);
+  state.registrationStatusTimer = null;
 }
 
-async function refreshUsbRegistrationStatus() {
-  const status = await getUsbRegistrationStatus();
-  renderUsbRegistrationStatus(status);
+async function refreshRegistrationStatus() {
+  if (state.usbDeviceMode) {
+    const status = await apiGetRegistrationStatus();
+    state.currentSampleIndex = status.current_sample_index || 0;
+    state.capturedSamples = new Array(status.captured_count || 0);
+    state.lastGuidance = status.guidance;
+    updateRegistrationUI();
+    updateHandGuideOverlay(status.guidance?.metrics);
+  } else {
+    const metrics = computeBrowserMetrics();
+    state.lastGuidance = evaluateBrowserGuidance(metrics);
+    updateRegistrationUI();
+    updateHandGuideOverlay(metrics);
+  }
 }
 
-function renderUsbRegistrationStatus(status) {
-  const index = status.current_sample_index || 0;
+// Browser mode: compute metrics from MediaPipe landmarks
+function computeBrowserMetrics() {
+  if (!state.lastLandmarks || !state.lastLandmarks.length) {
+    return { hand_detected: false };
+  }
+  const lm = state.lastLandmarks[0];
+  const w = videoReg.videoWidth || 640;
+  const h = videoReg.videoHeight || 480;
+
+  const wrist = lm[WRIST];
+  const indexMcp = lm[INDEX_MCP];
+  const middleMcp = lm[MIDDLE_MCP];
+  const pinkyMcp = lm[PINKY_MCP];
+
+  // Height ratio (hand size relative to frame)
+  const minY = Math.min(...lm.map(p => p.y));
+  const maxY = Math.max(...lm.map(p => p.y));
+  const heightRatio = maxY - minY;
+
+  // Rotation (knuckle line angle)
+  const dx = (pinkyMcp.x - indexMcp.x) * w;
+  const dy = (pinkyMcp.y - indexMcp.y) * h;
+  const rotationDegrees = Math.atan2(dy, dx) * (180 / Math.PI);
+
+  // Center X position
+  const centerX = (indexMcp.x + pinkyMcp.x) / 2;
+
+  // Check if hand is clipped (any landmark near edge)
+  const margin = 0.05;
+  const handClipped = lm.some(p => p.x < margin || p.x > 1 - margin || p.y < margin || p.y > 1 - margin);
+
+  return {
+    hand_detected: true,
+    height_ratio: heightRatio,
+    rotation_degrees: rotationDegrees,
+    center_x_ratio: centerX,
+    hand_clipped: handClipped,
+    brightness: 128,
+    blur_score: 100,
+    steady: state.handSeenMs > 300,
+  };
+}
+
+function evaluateBrowserGuidance(metrics) {
+  const target = SAMPLE_TARGETS[Math.min(state.currentSampleIndex, SAMPLE_TARGETS.length - 1)];
+  const failures = [];
+  const blockers = [];
+
+  if (!metrics.hand_detected) {
+    failures.push('hand');
+    blockers.push('hand');
+  } else {
+    if (metrics.hand_clipped) failures.push('clipping');
+    if (!(target.minHeight <= metrics.height_ratio && metrics.height_ratio <= target.maxHeight)) failures.push('size');
+    if (!(target.minRot <= metrics.rotation_degrees && metrics.rotation_degrees <= target.maxRot)) failures.push('rotation');
+    if (!(target.minCx <= metrics.center_x_ratio && metrics.center_x_ratio <= target.maxCx)) failures.push('position');
+    if (!metrics.steady) failures.push('steady');
+  }
+
+  return {
+    acceptable: blockers.length === 0 && failures.length <= 2,
+    failures,
+    blockers,
+    target: target.key,
+    label: target.label,
+  };
+}
+
+// ── Browser registration fallback ─────────────────────────────────
+function captureBrowserSample() {
+  if (state.capturedSamples.length >= 7) return;
+  if (!state.lastGuidance?.acceptable) {
+    setFeedback('Adjust hand position before capturing', 'error');
+    return;
+  }
+
+  let b64, rotationAngle = 0;
+  if (state.lastLandmarks && state.lastLandmarks.length > 0) {
+    const roi = extractClientROI(videoReg, state.lastLandmarks[0]);
+    b64 = roi.data;
+    rotationAngle = roi.rotationAngle;
+  } else {
+    b64 = captureFrame(videoReg);
+  }
+
+  triggerFlash('captureFlashReg');
+  state.capturedSamples.push({ data: b64, rotationAngle });
+  state.currentSampleIndex = state.capturedSamples.length;
+  setFeedback(`Captured sample ${state.capturedSamples.length}.`, 'success');
+  updateRegistrationUI();
+}
+
+async function finalizeBrowserRegistration() {
+  const name = userName.value.trim();
+  if (!name || state.capturedSamples.length < 7) return;
+
+  setFeedback('Registering…', '');
+  const avgRotation = state.capturedSamples.reduce((s, c) => s + (c.rotationAngle || 0), 0) / state.capturedSamples.length;
+
+  try {
+    const res = await fetch('/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        images: state.capturedSamples.map((c) => c.data),
+        is_roi: true,
+        rotation_angle: avgRotation,
+      }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.detail || 'Registration failed');
+    }
+    setFeedback(`✓ ${data.name} enrolled successfully`, 'success');
+  } catch (err) {
+    setFeedback(err.message + ' — please try again.', 'error');
+    throw err;
+  }
+}
+
+function updateRegistrationUI() {
+  const index = state.currentSampleIndex;
+  const count = state.capturedSamples.length;
   const sample = USB_REGISTRATION_SAMPLES[Math.min(index, USB_REGISTRATION_SAMPLES.length - 1)];
-  $('usbSampleTitle').textContent = sample.title;
-  $('usbSampleDesc').textContent = sample.desc;
-  $('captureCounter').textContent = `${status.captured_count || 0} / 7`;
 
-  const guidance = status.guidance;
-  renderQualityList(guidance);
+  $('regSampleTitle').textContent = sample.title;
+  $('regSampleDesc').textContent = sample.desc;
+  $('captureCounter').textContent = `${count} / 7`;
 
-  const active = !!status.active;
-  btnStartUsbRegistration.disabled = active;
-  btnCaptureUsbSample.disabled = !(guidance && guidance.acceptable);
-  btnFinalizeUsbRegistration.disabled = (status.captured_count || 0) < 7;
-  btnCancelUsbRegistration.disabled = !active;
+  document.querySelectorAll('#captureDots .dot').forEach((dot, i) =>
+    dot.classList.toggle('filled', i < count)
+  );
+
+  renderQualityList(state.lastGuidance);
+
+  const active = state.registrationActive;
+  const hasName = userName.value.trim().length > 0;
+  btnStartRegistration.disabled = active || !hasName;
+  btnCaptureSample.disabled = !active || !(state.lastGuidance?.acceptable);
+  btnFinalizeRegistration.disabled = !active || count < 7;
+  btnCancelRegistration.disabled = !active;
 }
 
 function renderQualityList(guidance) {
-  const list = $('usbQualityList');
+  const list = $('qualityList');
+  if (!state.registrationActive) {
+    list.innerHTML = '<li><span>Status</span><strong class="neutral">Enter name to start</strong></li>';
+    return;
+  }
   if (!guidance) {
-    list.innerHTML = '<li><span>Status</span><strong class="bad">Waiting for guidance</strong></li>';
+    list.innerHTML = '<li><span>Status</span><strong class="bad">Waiting for hand</strong></li>';
     return;
   }
   const failures = new Set(guidance.failures || []);
@@ -729,124 +869,15 @@ function renderQualityList(guidance) {
   }).join('');
 }
 
-// ── Browser registration fallback ─────────────────────────────────
-btnCapture.addEventListener('click', () => triggerCapture());
-
-btnReset?.addEventListener('click', () => {
-  const savedName = userName.value;
-  resetRegistration();
-  userName.value = savedName;
-  setFeedback('', '');
-});
-
-function triggerCapture() {
-  if (state.capturedImages.length >= 5) return;
-
-  let b64, isRoi, rotationAngle = 0;
-  if (state.lastLandmarks && state.lastLandmarks.length > 0) {
-    const roi = extractClientROI(videoReg, state.lastLandmarks[0]);
-    b64           = roi.data;
-    rotationAngle = roi.rotationAngle;
-    isRoi = true;
-  } else {
-    b64   = captureFrame(videoReg);
-    isRoi = false;
-  }
-
-  triggerFlash('captureFlashReg');
-  state.capturedImages.push({ data: b64, isRoi, rotationAngle });
-
-  const count = state.capturedImages.length;
-  $('browserCaptureCounter').textContent = `${count} / 5`;
-  if (btnReset) btnReset.disabled = false;
-
-  document.querySelectorAll('.dot').forEach((dot, i) =>
-    dot.classList.toggle('filled', i < count)
-  );
-
-  // In-camera pips
-  document.querySelectorAll('.cam-pip').forEach((pip, i) =>
-    pip.classList.toggle('filled', i < count)
-  );
-
-  if (count >= 5) {
-    btnRegister.disabled = !userName.value.trim();
-    $('registerHint').textContent = 'All 5 samples captured. Press Register.';
-    $('autoscanRingReg').style.display = 'none';
-  } else {
-    $('registerHint').textContent =
-      `${5 - count} more sample${5 - count > 1 ? 's' : ''} needed — hold still.`;
-  }
-}
-
-userName.addEventListener('input', () => {
-  btnRegister.disabled = state.capturedImages.length < 5 || !userName.value.trim();
-});
-
-btnRegister.addEventListener('click', async () => {
-  const name = userName.value.trim();
-  if (!name || state.capturedImages.length < 5) return;
-
-  btnRegister.disabled = true;
-  setFeedback('Registering…', '');
-
-  const allRoi = state.capturedImages.every((c) => c.isRoi);
-  // Average rotation angle across all captures (hand barely moves between shots)
-  const avgRotation = allRoi
-    ? state.capturedImages.reduce((s, c) => s + (c.rotationAngle || 0), 0) / state.capturedImages.length
-    : 0;
-
-  try {
-    const res = await fetch('/api/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        images: state.capturedImages.map((c) => c.data),
-        is_roi: allRoi,
-        rotation_angle: avgRotation,
-      }),
-    });
-    const data = await res.json();
-
-    if (!res.ok) {
-      const msg = data.detail || 'Registration failed';
-      setFeedback(msg + ' — samples cleared, please try again.', 'error');
-      // Auto-reset after a short pause so user can read the error
-      setTimeout(() => {
-        const savedName = userName.value;
-        resetRegistration();
-        userName.value = savedName;   // keep the name they typed
-        setFeedback('Ready — recapture all 5 samples.', '');
-      }, 2500);
-      return;
-    }
-
-    setFeedback(`✓ ${data.name} enrolled successfully`, 'success');
-    resetRegistration();
-    loadStats();
-  } catch (err) {
-    setFeedback('Network error — samples cleared, please try again.', 'error');
-    setTimeout(() => {
-      const savedName = userName.value;
-      resetRegistration();
-      userName.value = savedName;
-      setFeedback('', '');
-    }, 2500);
-    console.error(err);
-  }
-});
-
 function resetRegistration() {
-  state.capturedImages = [];
-  state.handSeenMs = 0;
+  state.registrationActive = false;
+  state.capturedSamples = [];
+  state.currentSampleIndex = 0;
+  state.lastGuidance = null;
+  stopRegistrationStatusPolling();
   userName.value = '';
-  $('browserCaptureCounter').textContent = '0 / 5';
-  document.querySelectorAll('.dot').forEach((d) => d.classList.remove('filled'));
-  $('registerHint').textContent = 'Enter a name, start USB registration, then capture each guided sample when the frame is acceptable.';
-  btnRegister.disabled = true;
-  if (btnReset) btnReset.disabled = true;
-  $('autoscanRingReg').style.display = 'none';
+  updateRegistrationUI();
+  updateHandGuideOverlay(null);
 }
 
 function setFeedback(msg, type) {
@@ -854,6 +885,87 @@ function setFeedback(msg, type) {
   el.textContent = msg;
   el.className = `register-feedback ${type}`;
 }
+
+// Hand guide overlay
+function updateHandGuideOverlay(metrics) {
+  const overlay = $('handGuideOverlay');
+  const sizeRing = $('guideSizeRing');
+  const crossH = $('guideCrossH');
+  const crossV = $('guideCrossV');
+  const rotArc = $('guideRotationArc');
+  const palmGuide = $('palmGuideReg');
+  const metricsDisplay = $('guidanceMetrics');
+
+  if (!metrics || !metrics.hand_detected) {
+    overlay.style.opacity = '0.3';
+    sizeRing.setAttribute('stroke', 'var(--text-muted)');
+    palmGuide.style.opacity = '1';
+    if (metricsDisplay) {
+      $('metricSize').querySelector('strong').textContent = '--';
+      $('metricRotation').querySelector('strong').textContent = '--';
+      $('metricPosition').querySelector('strong').textContent = '--';
+    }
+    return;
+  }
+
+  overlay.style.opacity = '1';
+  palmGuide.style.opacity = '0';
+
+  const target = SAMPLE_TARGETS[Math.min(state.currentSampleIndex, SAMPLE_TARGETS.length - 1)];
+
+  // Size indicator
+  const sizeOk = target.minHeight <= metrics.height_ratio && metrics.height_ratio <= target.maxHeight;
+  const sizeColor = sizeOk ? 'var(--success)' : 'var(--warning)';
+  sizeRing.setAttribute('stroke', sizeColor);
+  const targetSize = (target.minHeight + target.maxHeight) / 2;
+  const sizeRadius = 20 + targetSize * 40;
+  sizeRing.setAttribute('r', sizeRadius.toFixed(1));
+
+  // Position indicator (crosshair)
+  const posOk = target.minCx <= metrics.center_x_ratio && metrics.center_x_ratio <= target.maxCx;
+  const posColor = posOk ? 'var(--success)' : 'var(--warning)';
+  const targetCx = (target.minCx + target.maxCx) / 2 * 100;
+  crossH.setAttribute('x1', (targetCx - 5).toFixed(1));
+  crossH.setAttribute('x2', (targetCx + 5).toFixed(1));
+  crossH.setAttribute('y1', '50');
+  crossH.setAttribute('y2', '50');
+  crossV.setAttribute('x1', targetCx.toFixed(1));
+  crossV.setAttribute('x2', targetCx.toFixed(1));
+  crossH.setAttribute('stroke', posColor);
+  crossV.setAttribute('stroke', posColor);
+
+  // Rotation indicator
+  const rotOk = target.minRot <= metrics.rotation_degrees && metrics.rotation_degrees <= target.maxRot;
+  const rotColor = rotOk ? 'var(--success)' : 'var(--warning)';
+  const targetRot = (target.minRot + target.maxRot) / 2;
+  const arcRadius = 45;
+  const startAngle = (targetRot - 10) * Math.PI / 180;
+  const endAngle = (targetRot + 10) * Math.PI / 180;
+  const x1 = 50 + arcRadius * Math.cos(startAngle);
+  const y1 = 50 + arcRadius * Math.sin(startAngle);
+  const x2 = 50 + arcRadius * Math.cos(endAngle);
+  const y2 = 50 + arcRadius * Math.sin(endAngle);
+  rotArc.setAttribute('d', `M ${x1} ${y1} A ${arcRadius} ${arcRadius} 0 0 1 ${x2} ${y2}`);
+  rotArc.setAttribute('stroke', rotColor);
+
+  // Update metrics display
+  if (metricsDisplay) {
+    const sizePercent = (metrics.height_ratio * 100).toFixed(0);
+    const rotDeg = metrics.rotation_degrees.toFixed(1);
+    const posPercent = (metrics.center_x_ratio * 100).toFixed(0);
+    $('metricSize').querySelector('strong').textContent = `${sizePercent}%`;
+    $('metricSize').querySelector('strong').className = sizeOk ? 'ok' : 'warn';
+    $('metricRotation').querySelector('strong').textContent = `${rotDeg}°`;
+    $('metricRotation').querySelector('strong').className = rotOk ? 'ok' : 'warn';
+    $('metricPosition').querySelector('strong').textContent = `${posPercent}%`;
+    $('metricPosition').querySelector('strong').className = posOk ? 'ok' : 'warn';
+  }
+}
+
+userName.addEventListener('input', () => {
+  const hasName = userName.value.trim().length > 0;
+  btnStartRegistration.disabled = state.registrationActive || !hasName;
+});
 
 // ── Access Log ───────────────────────────────────────────────────
 // ── Access Log Pagination ─────────────────────────────────────────
@@ -995,12 +1107,27 @@ const esc = (s) =>
   setInterval(loadStatus, 5000);
 
   if (!state.usbDeviceMode) {
+    // Browser mode: use webcam for both scan and registration
     await startCamera();
     video.addEventListener('loadeddata', () => initMediaPipe(), { once: true });
     if (video.readyState >= 2) initMediaPipe();
+    // Show browser video in registration, hide USB preview
+    videoReg.style.display = 'block';
+    if (usbRegistrationPreview) usbRegistrationPreview.style.display = 'none';
   } else {
+    // USB mode: use MJPEG stream for both scan and registration
     startUsbPreview();
     startUsbScanEvents();
     setAutoMode(false);
+    // Show USB preview in registration, hide browser video
+    videoReg.style.display = 'none';
+    if (usbRegistrationPreview) {
+      usbRegistrationPreview.style.display = 'block';
+      usbRegistrationPreview.src = '/api/device-registration/preview.mjpg';
+    }
   }
+
+  // Initialize registration UI
+  updateRegistrationUI();
+})()
 })();
