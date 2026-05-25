@@ -93,16 +93,29 @@ def _select_seed_embeddings(samples: list[RegistrationSample], source_name: str)
 
 
 def build_seed_embedding(frame_rgb: np.ndarray, palm_processor, preprocessor) -> SeedEmbeddingResult:
-    extracted = preprocessor.extract_full_hand_roi(frame_rgb)
-    if extracted is None:
-        raise RuntimeError("Notebook preprocessing failed")
-
-    variants = create_seed_variants(extracted.roi)
-    samples = []
-    for index, variant in enumerate(variants):
-        processed = preprocessor.preprocess_roi_to_model_input(variant.roi)
-        embedding = palm_processor._run_inference(processed).astype(np.float32)
-        samples.append(RegistrationSample(index, 1.0, embedding))
+    # Use MediaPipe-based ROI extraction (palm_processor.extract_palm_roi) when
+    # rembg is disabled, since the threshold-based notebook preprocessing produces
+    # garbage without proper background removal.
+    if not preprocessor.rembg_enabled:
+        roi = palm_processor.extract_palm_roi(frame_rgb)
+        if roi is None:
+            raise RuntimeError("MediaPipe hand detection failed")
+        variants = create_seed_variants(roi)
+        samples = []
+        for index, variant in enumerate(variants):
+            processed = palm_processor.preprocess_roi(variant.roi)
+            embedding = palm_processor._run_inference(processed).astype(np.float32)
+            samples.append(RegistrationSample(index, 1.0, embedding))
+    else:
+        extracted = preprocessor.extract_full_hand_roi(frame_rgb)
+        if extracted is None:
+            raise RuntimeError("Notebook preprocessing failed")
+        variants = create_seed_variants(extracted.roi)
+        samples = []
+        for index, variant in enumerate(variants):
+            processed = preprocessor.preprocess_roi_to_model_input(variant.roi)
+            embedding = palm_processor._run_inference(processed).astype(np.float32)
+            samples.append(RegistrationSample(index, 1.0, embedding))
 
     result = _select_seed_embeddings(samples, "augmentations")
     return SeedEmbeddingResult(
@@ -124,6 +137,29 @@ def build_seed_embedding_from_frames(
     Only accepts frames where the detected palm rotation is within ±max_rotation degrees.
     This ensures consistent ROI extraction across enrollment images.
     """
+    # Use MediaPipe-based ROI extraction when rembg is disabled
+    if not preprocessor.rembg_enabled:
+        samples = []
+        for index, frame_rgb in enumerate(frames_rgb):
+            roi = palm_processor.extract_palm_roi(frame_rgb)
+            if roi is None:
+                continue
+            processed = palm_processor.preprocess_roi(roi)
+            embedding = palm_processor._run_inference(processed).astype(np.float32)
+            samples.append(RegistrationSample(index, 1.0, embedding))
+
+        if not samples:
+            raise RuntimeError("MediaPipe hand detection failed on all frames")
+
+        embeddings = [sample.embedding.astype(np.float32) for sample in samples]
+        average = np.mean(embeddings, axis=0).astype(np.float32)
+        return SeedEmbeddingResult(
+            embedding=average,
+            individual_embeddings=embeddings,
+            variant_count=len(frames_rgb),
+            selected_count=len(samples),
+        )
+
     valid_extractions = []
     for index, frame_rgb in enumerate(frames_rgb):
         extracted = preprocessor.extract_full_hand_roi(frame_rgb)

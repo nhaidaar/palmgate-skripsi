@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.config import DB_PATH, NOTEBOOK_REMBG_ENABLED
+from app.config import DB_PATH, HAND_LANDMARKER_PATH, NOTEBOOK_REMBG_ENABLED
 from app.database import Database
 from app.notebook_preprocessing import NotebookPreprocessor
 from app.palm_processor import PalmProcessor
@@ -19,7 +19,9 @@ def main():
     args = parser.parse_args()
 
     db = Database(args.db)
-    palm_processor = PalmProcessor(hand_model_path=None)
+    # Load hand model for MediaPipe-based ROI extraction when rembg is disabled
+    hand_model = HAND_LANDMARKER_PATH if not NOTEBOOK_REMBG_ENABLED else None
+    palm_processor = PalmProcessor(hand_model_path=hand_model)
     preprocessor = NotebookPreprocessor(rembg_enabled=NOTEBOOK_REMBG_ENABLED)
     try:
         summary = seed_users_from_directory(
