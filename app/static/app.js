@@ -146,6 +146,13 @@ function detectLoop(ts) {
       updateBrightnessBadge(video, result.landmarks[0], 'brightnessBadge');
     } else {
       updateBrightnessBadge(videoReg, result.landmarks[0], 'brightnessBadgeReg');
+      // Update hand guide overlay in real-time during browser registration
+      if (state.registrationActive && !state.usbDeviceMode) {
+        const metrics = computeBrowserMetrics();
+        state.lastGuidance = evaluateBrowserGuidance(metrics);
+        updateHandGuideOverlay(metrics);
+        updateRegistrationUI();
+      }
     }
   } else {
     state.handSeenMs = Math.max(0, state.handSeenMs - dt * 2.5);
@@ -154,6 +161,10 @@ function detectLoop(ts) {
       state.lastLandmarks = null;
       $('brightnessBadge').style.display    = 'none';
       $('brightnessBadgeReg').style.display = 'none';
+      // Clear hand guide overlay when no hand detected
+      if (state.currentTab === 'register' && state.registrationActive && !state.usbDeviceMode) {
+        updateHandGuideOverlay(null);
+      }
     }
     updateRingProgress();
   }
@@ -490,9 +501,16 @@ async function triggerScan() {
   triggerFlash('captureFlash');
   showScanning();
 
-  const b64 = captureFrame(video);
-  const isRoi = false;
-  const rotationAngle = 0;
+  // Use client-side ROI extraction if landmarks available (matches registration pipeline)
+  let b64, isRoi = false, rotationAngle = 0;
+  if (state.lastLandmarks && state.lastLandmarks.length > 0) {
+    const roi = extractClientROI(video, state.lastLandmarks[0]);
+    b64 = roi.data;
+    rotationAngle = roi.rotationAngle;
+    isRoi = true;
+  } else {
+    b64 = captureFrame(video);
+  }
 
   const scanStart = performance.now();
 
