@@ -935,43 +935,59 @@ function updateHandGuideOverlay(metrics) {
   sizeRing.setAttribute('r', sizeRadius.toFixed(1));
 
   // Position indicator (crosshair)
-  const posOk = target.minCx <= metrics.center_x_ratio && metrics.center_x_ratio <= target.maxCx;
-  const posColor = posOk ? 'var(--success)' : 'var(--warning)';
-  const targetCx = (target.minCx + target.maxCx) / 2 * 100;
-  crossH.setAttribute('x1', (targetCx - 5).toFixed(1));
-  crossH.setAttribute('x2', (targetCx + 5).toFixed(1));
-  crossH.setAttribute('y1', '50');
-  crossH.setAttribute('y2', '50');
-  crossV.setAttribute('x1', targetCx.toFixed(1));
-  crossV.setAttribute('x2', targetCx.toFixed(1));
-  crossH.setAttribute('stroke', posColor);
-  crossV.setAttribute('stroke', posColor);
+  if (crossH && crossV) {
+    const posOk = target.minCx <= metrics.center_x_ratio && metrics.center_x_ratio <= target.maxCx;
+    const posColor = posOk ? 'var(--success)' : 'var(--warning)';
+    const targetCx = (target.minCx + target.maxCx) / 2 * 100;
+    crossH.setAttribute('x1', (targetCx - 5).toFixed(1));
+    crossH.setAttribute('x2', (targetCx + 5).toFixed(1));
+    crossH.setAttribute('y1', '50');
+    crossH.setAttribute('y2', '50');
+    crossV.setAttribute('x1', targetCx.toFixed(1));
+    crossV.setAttribute('x2', targetCx.toFixed(1));
+    crossH.setAttribute('stroke', posColor);
+    crossV.setAttribute('stroke', posColor);
+  }
 
   // Rotation indicator
-  const rotOk = target.minRot <= metrics.rotation_degrees && metrics.rotation_degrees <= target.maxRot;
-  const rotColor = rotOk ? 'var(--success)' : 'var(--warning)';
-  const targetRot = (target.minRot + target.maxRot) / 2;
-  const arcRadius = 45;
-  const startAngle = (targetRot - 10) * Math.PI / 180;
-  const endAngle = (targetRot + 10) * Math.PI / 180;
-  const x1 = 50 + arcRadius * Math.cos(startAngle);
-  const y1 = 50 + arcRadius * Math.sin(startAngle);
-  const x2 = 50 + arcRadius * Math.cos(endAngle);
-  const y2 = 50 + arcRadius * Math.sin(endAngle);
-  rotArc.setAttribute('d', `M ${x1} ${y1} A ${arcRadius} ${arcRadius} 0 0 1 ${x2} ${y2}`);
-  rotArc.setAttribute('stroke', rotColor);
+  if (rotArc) {
+    const rotOk = target.minRot <= metrics.rotation_degrees && metrics.rotation_degrees <= target.maxRot;
+    const rotColor = rotOk ? 'var(--success)' : 'var(--warning)';
+    const targetRot = (target.minRot + target.maxRot) / 2;
+    const arcRadius = 45;
+    const startAngle = (targetRot - 10) * Math.PI / 180;
+    const endAngle = (targetRot + 10) * Math.PI / 180;
+    const x1 = 50 + arcRadius * Math.cos(startAngle);
+    const y1 = 50 + arcRadius * Math.sin(startAngle);
+    const x2 = 50 + arcRadius * Math.cos(endAngle);
+    const y2 = 50 + arcRadius * Math.sin(endAngle);
+    rotArc.setAttribute('d', `M ${x1} ${y1} A ${arcRadius} ${arcRadius} 0 0 1 ${x2} ${y2}`);
+    rotArc.setAttribute('stroke', rotColor);
+  }
 
   // Update metrics display
   if (metricsDisplay) {
+    const sizeOk = target.minHeight <= metrics.height_ratio && metrics.height_ratio <= target.maxHeight;
+    const rotOk = target.minRot <= metrics.rotation_degrees && metrics.rotation_degrees <= target.maxRot;
+    const posOk = target.minCx <= metrics.center_x_ratio && metrics.center_x_ratio <= target.maxCx;
     const sizePercent = (metrics.height_ratio * 100).toFixed(0);
     const rotDeg = metrics.rotation_degrees.toFixed(1);
     const posPercent = (metrics.center_x_ratio * 100).toFixed(0);
-    $('metricSize').querySelector('strong').textContent = `${sizePercent}%`;
-    $('metricSize').querySelector('strong').className = sizeOk ? 'ok' : 'warn';
-    $('metricRotation').querySelector('strong').textContent = `${rotDeg}°`;
-    $('metricRotation').querySelector('strong').className = rotOk ? 'ok' : 'warn';
-    $('metricPosition').querySelector('strong').textContent = `${posPercent}%`;
-    $('metricPosition').querySelector('strong').className = posOk ? 'ok' : 'warn';
+    const metricSize = $('metricSize');
+    const metricRotation = $('metricRotation');
+    const metricPosition = $('metricPosition');
+    if (metricSize) {
+      metricSize.querySelector('strong').textContent = `${sizePercent}%`;
+      metricSize.querySelector('strong').className = sizeOk ? 'ok' : 'warn';
+    }
+    if (metricRotation) {
+      metricRotation.querySelector('strong').textContent = `${rotDeg}°`;
+      metricRotation.querySelector('strong').className = rotOk ? 'ok' : 'warn';
+    }
+    if (metricPosition) {
+      metricPosition.querySelector('strong').textContent = `${posPercent}%`;
+      metricPosition.querySelector('strong').className = posOk ? 'ok' : 'warn';
+    }
   }
 }
 
@@ -985,7 +1001,7 @@ userName?.addEventListener('input', () => {
 const LOG_PAGE_SIZE = 10;
 const logPagState = { page: 0, total: 0 };
 
-btnRefresh.addEventListener('click', () => {
+btnRefresh?.addEventListener('click', () => {
   logPagState.page = 0;
   loadLogs();
   loadUsers();
