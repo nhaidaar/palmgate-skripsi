@@ -50,7 +50,7 @@ services:
       - CAMERA_DEVICE_PATH=/dev/video1
       - DEVICE_PREVIEW_FRAME_INTERVAL_MS=33
       - DEVICE_FRAME_INTERVAL_MS=250
-      - NOTEBOOK_REMBG_ENABLED=1
+      - NOTEBOOK_REMBG_ENABLED=0
       - NOTEBOOK_REMBG_MODEL=silueta
     devices:
       - /dev/v4l/by-id/usb-046d_C270_HD_WEBCAM_4DEFC680-video-index0:/dev/video1
