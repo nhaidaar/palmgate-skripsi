@@ -11,6 +11,7 @@ const SCAN_HOLD_MS     = 800;    // hold steady before auto-scan triggers
 const REG_HOLD_MS      = 1000;   // hold steady before auto-capture
 const REG_COOLDOWN_MS  = 1500;   // gap between auto-captures
 const SCAN_COOLDOWN_MS = 3000;   // cooldown after scan result
+const USB_PREVIEW_STREAM_URL = '/api/device-registration/preview.mjpg';
 
 const REGISTRATION_HANDS = ['left', 'right'];
 const REGISTRATION_CAPTURES_PER_HAND = 5;
@@ -36,9 +37,6 @@ const state = {
   autoMode: true,
   usbDeviceMode: false,
   usbScanEventSource: null,
-  usbPreviewTimer: null,
-  usbPreviewBusy: false,
-  usbPreviewObjectUrl: null,
   // Registration state
   registrationActive: false,
   registrationStatusTimer: null,
@@ -404,7 +402,7 @@ async function startCamera() {
   }
 }
 
-function startUsbPreview() {
+function ensureUsbScanPreview() {
   video.style.display = 'none';
   let preview = $('usbPreview');
   if (!preview) {
@@ -413,29 +411,30 @@ function startUsbPreview() {
     preview.className = 'usb-preview';
     $('cameraFrame').prepend(preview);
   }
+  return preview;
+}
 
-  const updatePreview = async () => {
-    if (state.usbPreviewBusy) return;
-    state.usbPreviewBusy = true;
-    try {
-      const res = await fetch(`/api/device-registration/preview.jpg?t=${Date.now()}`, { cache: 'no-store' });
-      if (!res.ok) return;
-      const blob = await res.blob();
-      const nextUrl = URL.createObjectURL(blob);
-      preview.src = nextUrl;
-      if (usbRegistrationPreview) usbRegistrationPreview.src = nextUrl;
-      if (state.usbPreviewObjectUrl) URL.revokeObjectURL(state.usbPreviewObjectUrl);
-      state.usbPreviewObjectUrl = nextUrl;
-    } catch (err) {
-      console.warn('[PalmAccess] USB preview update failed', err);
-    } finally {
-      state.usbPreviewBusy = false;
+function setUsbPreviewStream(img, active) {
+  if (!img) return;
+  if (active) {
+    if (!img.src.includes(USB_PREVIEW_STREAM_URL)) {
+      img.src = `${USB_PREVIEW_STREAM_URL}?t=${Date.now()}`;
     }
-  };
+  } else {
+    img.removeAttribute('src');
+  }
+}
 
-  updatePreview();
-  if (state.usbPreviewTimer) clearInterval(state.usbPreviewTimer);
-  state.usbPreviewTimer = setInterval(updatePreview, 150);
+function syncUsbPreviewTarget() {
+  if (!state.usbDeviceMode) return;
+  const scanPreview = ensureUsbScanPreview();
+  setUsbPreviewStream(scanPreview, state.currentTab === 'scan');
+  setUsbPreviewStream(usbRegistrationPreview, state.currentTab === 'register');
+}
+
+function startUsbPreview() {
+  ensureUsbScanPreview();
+  syncUsbPreviewTarget();
   $('cameraStatus').innerHTML = '<span class="cam-dot"></span>USB camera active';
 }
 
@@ -494,6 +493,10 @@ function switchTab(tab) {
     logPagState.page = 0;
     loadLogs();
     loadUsers();
+  }
+
+  if (state.usbDeviceMode) {
+    syncUsbPreviewTarget();
   }
 }
 

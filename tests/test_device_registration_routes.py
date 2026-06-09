@@ -153,6 +153,33 @@ def test_mjpeg_frames_yields_latest_frame():
     assert b"\xff\xd8jpeg-data" in chunk
 
 
+def test_mjpeg_frames_uses_runtime_preview_interval(monkeypatch):
+    import pytest
+    from app.routes import device_registration
+    from app.routes.device_registration import mjpeg_frames
+
+    class FakeRuntime:
+        preview_frame_interval_ms = 25
+
+        def get_latest_frame_jpeg(self):
+            return b"\xff\xd8jpeg-data"
+
+    sleeps = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr(device_registration.time, "sleep", fake_sleep)
+    frames = mjpeg_frames(FakeRuntime())
+
+    next(frames)
+    with pytest.raises(RuntimeError):
+        next(frames)
+
+    assert sleeps == [0.025]
+
+
 def test_usb_preview_endpoint_returns_503_without_frame(monkeypatch):
     import app.main as main
 

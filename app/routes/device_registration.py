@@ -106,7 +106,8 @@ def mjpeg_frames(runtime):
         frame = runtime.get_latest_frame_jpeg()
         if frame is not None:
             yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
-        time.sleep(0.1)
+        interval_seconds = getattr(runtime, "preview_frame_interval_ms", 100) / 1000
+        time.sleep(max(interval_seconds, 0.001))
 
 
 @router.get("/preview.mjpg")

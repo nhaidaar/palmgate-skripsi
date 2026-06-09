@@ -16,6 +16,15 @@ def test_device_runtime_env_overrides(monkeypatch):
     assert config.APP_HOST == "0.0.0.0"
 
 
+def test_usb_preview_interval_defaults_to_realtime(monkeypatch):
+    monkeypatch.delenv("DEVICE_PREVIEW_FRAME_INTERVAL_MS", raising=False)
+
+    import app.config as config
+    importlib.reload(config)
+
+    assert config.DEVICE_PREVIEW_FRAME_INTERVAL_MS == 33
+
+
 def test_notebook_rembg_env_override(monkeypatch):
     monkeypatch.setenv("NOTEBOOK_REMBG_ENABLED", "0")
 

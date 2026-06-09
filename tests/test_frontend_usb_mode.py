@@ -17,14 +17,16 @@ def test_frontend_tracks_usb_device_mode_from_status():
     assert "data.app?.camera_source === 'usb'" in source
 
 
-def test_frontend_shows_usb_preview_without_browser_camera():
+def test_frontend_streams_usb_preview_without_browser_camera():
     source = Path("app/static/app.js").read_text()
     init_block = source[source.index("Init") :]
 
     assert "startUsbPreview()" in init_block
     assert "document.createElement('img')" in source
-    assert "/api/device-registration/preview.jpg?t=" in source
-    assert "usbRegistrationPreview.src = nextUrl" in source
+    assert "const USB_PREVIEW_STREAM_URL = '/api/device-registration/preview.mjpg'" in source
+    assert "/api/device-registration/preview.jpg?t=" not in source
+    assert "URL.createObjectURL" not in source
+    assert "setInterval(updatePreview" not in source
     assert init_block.index("startUsbPreview()") < init_block.index("setAutoMode(false)")
 
 
@@ -35,7 +37,19 @@ def test_usb_registration_panel_has_camera_preview():
     assert "regCameraFrame" in html
     assert "usbRegistrationPreview" in html
     assert "usbRegistrationPreview" in source
-    assert "usbRegistrationPreview.src = nextUrl" in source
+    assert "syncUsbPreviewTarget()" in source
+    assert "setUsbPreviewStream(usbRegistrationPreview" in source
+
+
+def test_frontend_keeps_only_active_usb_preview_stream_connected():
+    source = Path("app/static/app.js").read_text()
+    switch_tab_block = source[source.index("function switchTab") : source.index("btnMode.addEventListener")]
+
+    assert "syncUsbPreviewTarget()" in source
+    assert "state.currentTab === 'scan'" in source
+    assert "state.currentTab === 'register'" in source
+    assert "img.removeAttribute('src')" in source
+    assert "syncUsbPreviewTarget();" in switch_tab_block
 
 
 def test_usb_quality_ui_distinguishes_required_and_guidance_items():
