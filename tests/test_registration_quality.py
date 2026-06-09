@@ -1,15 +1,13 @@
 from app.services.registration_quality import SAMPLE_TARGETS, evaluate_guidance
 
 
-def test_has_seven_registration_targets():
+def test_has_five_registration_targets():
     assert [target.key for target in SAMPLE_TARGETS] == [
         "center",
         "closer",
         "farther",
         "rotate_left",
         "rotate_right",
-        "shift_left",
-        "shift_right",
     ]
 
 

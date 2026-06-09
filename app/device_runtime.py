@@ -17,10 +17,12 @@ from app.config import (
     DEVICE_HOLD_MS,
     DEVICE_STATUS_HEARTBEAT_MS,
     DUPLICATE_THRESHOLD,
+    REGISTRATION_CAPTURES_PER_HAND,
+    REGISTRATION_HANDS,
+    REGISTRATION_MIN_VALID_PER_HAND,
+    REGISTRATION_STORE_EMBEDDINGS_PER_HAND,
+    REGISTRATION_TOTAL_CAPTURES,
     SIMILARITY_THRESHOLD,
-    USB_REGISTRATION_CAPTURES,
-    USB_REGISTRATION_MIN_VALID,
-    USB_REGISTRATION_STORE_EMBEDDINGS,
 )
 from app.services.recognition_service import match_embedding_and_log
 from app.services.registration_quality import SAMPLE_TARGETS, evaluate_guidance
@@ -122,6 +124,13 @@ class DeviceRuntime:
             frame = self.capture_preview_frame()
         return frame
 
+    def _hand_for_sample_index(self, index: int) -> str:
+        hand_index = index // REGISTRATION_CAPTURES_PER_HAND
+        return REGISTRATION_HANDS[min(hand_index, len(REGISTRATION_HANDS) - 1)]
+
+    def _target_index_for_sample_index(self, index: int) -> int:
+        return index % REGISTRATION_CAPTURES_PER_HAND
+
     def get_latest_frame_jpeg(self):
         frame = self._latest_frame_copy()
         if frame is None:
@@ -155,7 +164,7 @@ class DeviceRuntime:
     def capture_registration_sample(self):
         if self.registration_session is None:
             raise RuntimeError("No registration active")
-        if self.registration_session.current_sample_index >= USB_REGISTRATION_CAPTURES:
+        if self.registration_session.current_sample_index >= REGISTRATION_TOTAL_CAPTURES:
             raise RuntimeError("All registration samples captured")
         guidance = self.registration_session.last_guidance
         if not guidance or not guidance.get("acceptable", False):
@@ -164,8 +173,10 @@ class DeviceRuntime:
         embedding = self.palm_processor.get_embedding_from_notebook_frame(frame)
         if embedding is None:
             raise RuntimeError("Notebook preprocessing failed")
+        sample_index = self.registration_session.current_sample_index
         sample = {
-            "sample_index": self.registration_session.current_sample_index,
+            "sample_index": sample_index,
+            "hand": self._hand_for_sample_index(sample_index),
             "quality_score": float(guidance.get("score", 1.0)),
             "embedding": embedding,
         }
@@ -177,37 +188,57 @@ class DeviceRuntime:
         if self.registration_session is None:
             raise RuntimeError("No registration active")
 
-        samples = [
-            RegistrationSample(
-                sample_index=item["sample_index"],
-                quality_score=item["quality_score"],
-                embedding=item["embedding"],
-            )
-            for item in self.registration_session.captured_samples
-        ]
-        ranked = rank_registration_samples(
-            samples,
-            keep=USB_REGISTRATION_STORE_EMBEDDINGS,
-            min_similarity=self.threshold,
-        )
-        if len(ranked) < USB_REGISTRATION_MIN_VALID:
-            raise RuntimeError("Not enough valid registration samples")
+        grouped: dict[str, list[RegistrationSample]] = {hand: [] for hand in REGISTRATION_HANDS}
+        for item in self.registration_session.captured_samples:
+            hand = item.get("hand", self._hand_for_sample_index(item["sample_index"]))
+            if hand in grouped:
+                grouped[hand].append(
+                    RegistrationSample(
+                        sample_index=item["sample_index"],
+                        quality_score=item["quality_score"],
+                        embedding=item["embedding"],
+                    )
+                )
 
-        embeddings = [sample.embedding.astype(np.float32) for sample in ranked]
+        ranked_by_hand = {}
+        for hand in REGISTRATION_HANDS:
+            ranked = rank_registration_samples(
+                grouped[hand],
+                keep=REGISTRATION_STORE_EMBEDDINGS_PER_HAND,
+                min_similarity=self.threshold,
+            )
+            if len(ranked) < REGISTRATION_MIN_VALID_PER_HAND:
+                raise RuntimeError("Not enough valid registration samples")
+            ranked_by_hand[hand] = ranked
+
+        embeddings = []
+        embedding_hands = []
+        for hand in REGISTRATION_HANDS:
+            for sample in ranked_by_hand[hand]:
+                embeddings.append(sample.embedding.astype(np.float32))
+                embedding_hands.append(hand)
+
         avg_embedding = np.mean(embeddings, axis=0).astype(np.float32)
         stored = self.db.get_all_embeddings()
-        duplicate = self.palm_processor.compute_similarity(avg_embedding, stored, DUPLICATE_THRESHOLD)
-        if duplicate["status"] == "ALLOWED":
-            raise RuntimeError(f"This palm is already registered as '{duplicate['name']}'")
+        for embedding in embeddings:
+            duplicate = self.palm_processor.compute_similarity(embedding, stored, DUPLICATE_THRESHOLD)
+            if duplicate["status"] == "ALLOWED":
+                raise RuntimeError(f"This palm is already registered as '{duplicate['name']}'")
         user_id = self.db.add_user(
             self.registration_session.name,
             avg_embedding,
             individual_embeddings=embeddings,
+            embedding_hands=embedding_hands,
         )
         name = self.registration_session.name
         self.registration_session = None
         self.worker_state = "running"
-        return {"user_id": user_id, "name": name, "stored_embeddings": len(embeddings)}
+        return {
+            "user_id": user_id,
+            "name": name,
+            "stored_embeddings": len(embeddings),
+            "hands": {hand: embedding_hands.count(hand) for hand in REGISTRATION_HANDS},
+        }
 
     def tick(self):
         now_ms = self.clock.now()
@@ -229,7 +260,8 @@ class DeviceRuntime:
             if self.registration_session.last_guidance:
                 previous_metrics = self.registration_session.last_guidance.get("metrics")
             metrics = self.palm_processor.get_registration_guidance_metrics(frame, previous_metrics)
-            target_index = min(self.registration_session.current_sample_index, USB_REGISTRATION_CAPTURES - 1)
+            sample_index = min(self.registration_session.current_sample_index, REGISTRATION_TOTAL_CAPTURES - 1)
+            target_index = self._target_index_for_sample_index(sample_index)
             guidance = evaluate_guidance(target_index, metrics)
             target = SAMPLE_TARGETS[target_index]
             self.registration_session.last_guidance = {

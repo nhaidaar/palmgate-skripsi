@@ -33,7 +33,13 @@ def test_start_device_registration_returns_session(monkeypatch):
     response = client.post("/api/device-registration/start", json={"name": "Alice"})
 
     assert response.status_code == 200
-    assert response.json()["session_id"] == "session-1"
+    data = response.json()
+    assert data["session_id"] == "session-1"
+    assert data["total_required"] == 10
+    assert data["required_per_hand"] == 5
+    assert data["current_hand"] == "left"
+    assert data["left_count"] == 0
+    assert data["right_count"] == 0
 
 
 def test_device_registration_status_returns_session(monkeypatch):
@@ -43,7 +49,7 @@ def test_device_registration_status_returns_session(monkeypatch):
         id = "session-1"
         name = "Alice"
         current_sample_index = 2
-        captured_samples = [{}, {}]
+        captured_samples = [{"hand": "left"}, {"hand": "left"}]
         last_guidance = {"acceptable": True}
 
     class FakeRuntime:
@@ -56,8 +62,14 @@ def test_device_registration_status_returns_session(monkeypatch):
     response = client.get("/api/device-registration/status")
 
     assert response.status_code == 200
-    assert response.json()["captured_count"] == 2
-    assert response.json()["guidance"]["acceptable"] is True
+    data = response.json()
+    assert data["captured_count"] == 2
+    assert data["total_required"] == 10
+    assert data["required_per_hand"] == 5
+    assert data["current_hand"] == "left"
+    assert data["left_count"] == 2
+    assert data["right_count"] == 0
+    assert data["guidance"]["acceptable"] is True
 
 
 def test_capture_endpoint_returns_sample(monkeypatch):

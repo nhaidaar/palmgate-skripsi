@@ -520,11 +520,32 @@ def test_capture_registration_sample_uses_guidance_score():
     sample = runtime.capture_registration_sample()
 
     assert sample["sample_index"] == 0
+    assert sample["hand"] == "left"
     assert sample["quality_score"] == 0.85
     np.testing.assert_array_equal(sample["embedding"], np.ones(4, dtype=np.float32))
 
 
-def test_finalize_registration_stores_best_samples():
+def test_capture_registration_sample_tags_first_five_left_next_five_right():
+    from app.device_runtime import DeviceRuntime
+
+    class FakeCamera:
+        def read(self):
+            return np.zeros((240, 320, 3), dtype=np.uint8)
+
+    class FakeProcessor:
+        def get_embedding_from_notebook_frame(self, frame):
+            return np.ones(4, dtype=np.float32)
+
+    runtime = DeviceRuntime(camera=FakeCamera(), palm_processor=FakeProcessor(), db=None)
+    runtime.start_registration("Alice")
+    runtime.registration_session.last_guidance = {"acceptable": True, "score": 1.0}
+
+    samples = [runtime.capture_registration_sample() for _ in range(10)]
+
+    assert [sample["hand"] for sample in samples] == ["left"] * 5 + ["right"] * 5
+
+
+def test_finalize_registration_stores_five_embeddings_per_hand():
     from app.device_runtime import DeviceRuntime
 
     class FakeProcessor:
@@ -538,24 +559,66 @@ def test_finalize_registration_stores_best_samples():
         def get_all_embeddings(self):
             return []
 
-        def add_user(self, name, embedding, individual_embeddings=None):
-            self.added = (name, embedding, individual_embeddings)
+        def add_user(self, name, embedding, individual_embeddings=None, embedding_hands=None):
+            self.added = (name, embedding, individual_embeddings, embedding_hands)
             return 123
 
     runtime = DeviceRuntime(camera=None, palm_processor=FakeProcessor(), db=FakeDB())
     runtime.start_registration("Alice")
     runtime.registration_session.captured_samples = [
-        {"sample_index": i, "quality_score": 1.0, "embedding": np.ones(4, dtype=np.float32)}
-        for i in range(7)
+        {
+            "sample_index": i,
+            "hand": "left" if i < 5 else "right",
+            "quality_score": 1.0,
+            "embedding": np.ones(4, dtype=np.float32),
+        }
+        for i in range(10)
     ]
 
     result = runtime.finalize_registration()
 
     assert result["user_id"] == 123
+    assert result["stored_embeddings"] == 10
+    assert result["hands"] == {"left": 5, "right": 5}
     assert runtime.db.added[0] == "Alice"
-    assert len(runtime.db.added[2]) == 5
+    assert len(runtime.db.added[2]) == 10
+    assert runtime.db.added[3] == ["left"] * 5 + ["right"] * 5
     assert runtime.registration_session is None
     assert runtime.worker_state == "running"
+
+
+def test_finalize_registration_requires_five_valid_samples_per_hand():
+    from app.device_runtime import DeviceRuntime
+
+    class FakeProcessor:
+        def compute_similarity(self, embedding, stored, threshold):
+            return {"status": "DENIED", "name": "Unknown", "similarity": 0.1}
+
+    class FakeDB:
+        def get_all_embeddings(self):
+            return []
+
+        def add_user(self, *args, **kwargs):
+            raise AssertionError("Incomplete registration should not be stored")
+
+    runtime = DeviceRuntime(camera=None, palm_processor=FakeProcessor(), db=FakeDB())
+    runtime.start_registration("Alice")
+    runtime.registration_session.captured_samples = [
+        {
+            "sample_index": i,
+            "hand": "left" if i < 5 else "right",
+            "quality_score": 1.0,
+            "embedding": np.ones(4, dtype=np.float32),
+        }
+        for i in range(9)
+    ]
+
+    try:
+        runtime.finalize_registration()
+    except RuntimeError as exc:
+        assert "Not enough valid registration samples" in str(exc)
+    else:
+        raise AssertionError("Expected incomplete registration rejection")
 
 
 def test_finalize_registration_rejects_duplicate_palm():
@@ -575,8 +638,13 @@ def test_finalize_registration_rejects_duplicate_palm():
     runtime = DeviceRuntime(camera=None, palm_processor=FakeProcessor(), db=FakeDB())
     runtime.start_registration("Alice")
     runtime.registration_session.captured_samples = [
-        {"sample_index": i, "quality_score": 1.0, "embedding": np.ones(4, dtype=np.float32)}
-        for i in range(7)
+        {
+            "sample_index": i,
+            "hand": "left" if i < 5 else "right",
+            "quality_score": 1.0,
+            "embedding": np.ones(4, dtype=np.float32),
+        }
+        for i in range(10)
     ]
 
     try:
@@ -602,12 +670,12 @@ def test_capture_requires_acceptable_guidance():
         raise AssertionError("Expected RuntimeError")
 
 
-def test_capture_registration_sample_stops_after_seven_samples():
+def test_capture_registration_sample_stops_after_ten_samples():
     from app.device_runtime import DeviceRuntime
 
     runtime = DeviceRuntime(camera=None, palm_processor=None, db=None)
     runtime.start_registration("Alice")
-    runtime.registration_session.current_sample_index = 7
+    runtime.registration_session.current_sample_index = 10
     runtime.registration_session.last_guidance = {"acceptable": True, "score": 1.0}
 
     try:
@@ -616,6 +684,39 @@ def test_capture_registration_sample_stops_after_seven_samples():
         assert "All registration samples captured" in str(exc)
     else:
         raise AssertionError("Expected RuntimeError")
+
+
+def test_registration_tick_reuses_five_guidance_targets_per_hand():
+    from app.device_runtime import DeviceRuntime
+
+    class FakeCamera:
+        def read(self):
+            return np.full((240, 320, 3), 128, dtype=np.uint8)
+
+    class FakeProcessor:
+        def get_registration_guidance_metrics(self, frame, previous_metrics=None):
+            return {
+                "hand_detected": True,
+                "hand_clipped": False,
+                "height_ratio": 0.55,
+                "rotation_degrees": 0.0,
+                "center_x_ratio": 0.5,
+                "brightness": 120.0,
+                "blur_score": 150.0,
+                "steady": True,
+            }
+
+    class FakeDB:
+        def upsert_device_status(self, **kwargs):
+            pass
+
+    runtime = DeviceRuntime(FakeCamera(), palm_processor=FakeProcessor(), db=FakeDB())
+    runtime.start_registration("Alice")
+    runtime.registration_session.current_sample_index = 5
+
+    runtime.tick()
+
+    assert runtime.registration_session.last_guidance["target"] == "center"
 
 
 def test_registration_tick_after_final_sample_keeps_last_target():
@@ -631,8 +732,8 @@ def test_registration_tick_after_final_sample_keeps_last_target():
                 "hand_detected": True,
                 "hand_clipped": False,
                 "height_ratio": 0.55,
-                "rotation_degrees": 0.0,
-                "center_x_ratio": 0.65,
+                "rotation_degrees": 10.0,
+                "center_x_ratio": 0.5,
                 "brightness": 120.0,
                 "blur_score": 150.0,
                 "steady": True,
@@ -644,11 +745,11 @@ def test_registration_tick_after_final_sample_keeps_last_target():
 
     runtime = DeviceRuntime(FakeCamera(), palm_processor=FakeProcessor(), db=FakeDB())
     runtime.start_registration("Alice")
-    runtime.registration_session.current_sample_index = 7
+    runtime.registration_session.current_sample_index = 10
 
     runtime.tick()
 
-    assert runtime.registration_session.last_guidance["target"] == "shift_right"
+    assert runtime.registration_session.last_guidance["target"] == "rotate_right"
 
 
 def test_registration_tick_updates_real_guidance_from_processor():

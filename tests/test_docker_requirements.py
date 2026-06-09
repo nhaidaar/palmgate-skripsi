@@ -26,6 +26,6 @@ def test_usb_compose_uses_logitech_camera_device_path():
 def test_usb_compose_uses_separate_preview_and_processing_intervals():
     compose = Path("docker-compose.yml").read_text()
 
-    assert "DEVICE_PREVIEW_FRAME_INTERVAL_MS=100" in compose
-    assert "DEVICE_FRAME_INTERVAL_MS=500" in compose
+    assert "DEVICE_PREVIEW_FRAME_INTERVAL_MS=33" in compose
+    assert "DEVICE_FRAME_INTERVAL_MS=250" in compose
     assert "DEVICE_FRAME_INTERVAL_MS=1000" not in compose

@@ -33,8 +33,6 @@ SAMPLE_TARGETS = [
     SampleTarget("farther", "Move farther", 0.38, 0.48, -5.0, 5.0, 0.40, 0.60),
     SampleTarget("rotate_left", "Rotate left", 0.50, 0.60, -15.0, -8.0, 0.40, 0.60),
     SampleTarget("rotate_right", "Rotate right", 0.50, 0.60, 8.0, 15.0, 0.40, 0.60),
-    SampleTarget("shift_left", "Shift left", 0.50, 0.60, -5.0, 5.0, 0.30, 0.40),
-    SampleTarget("shift_right", "Shift right", 0.50, 0.60, -5.0, 5.0, 0.60, 0.70),
 ]
 
 

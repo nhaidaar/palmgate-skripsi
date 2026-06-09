@@ -10,6 +10,9 @@ def test_opencv_camera_source_opens_device_path(monkeypatch):
         def isOpened(self):
             return True
 
+        def set(self, prop, value):
+            pass
+
     monkeypatch.setattr(camera.cv2, "VideoCapture", FakeCapture)
 
     camera.OpenCVCameraSource("/dev/video1")

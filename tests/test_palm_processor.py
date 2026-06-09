@@ -50,6 +50,8 @@ def test_palm_processor_uses_notebook_rembg_config(monkeypatch):
 
 def test_get_embedding_from_notebook_frame_returns_none_when_preprocessing_fails(processor):
     class FakeNotebookPreprocessor:
+        rembg_enabled = True
+
         def extract_full_hand_roi(self, frame):
             return None
 
@@ -65,6 +67,8 @@ def test_get_embedding_from_notebook_frame_runs_inference(processor, monkeypatch
         model_input = np.ones((224, 224, 3), dtype=np.float32)
 
     class FakeNotebookPreprocessor:
+        rembg_enabled = True
+
         def extract_full_hand_roi(self, frame):
             return FakeResult()
 

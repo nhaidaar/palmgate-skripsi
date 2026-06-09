@@ -260,7 +260,7 @@
         <div class="register-form-col">
           <div class="form-block">
             <h2 class="form-title">Register new user</h2>
-            <p class="form-desc">Follow 7 guided poses to enroll. PalmGate stores the best 5 samples for reliable recognition.</p>
+            <p class="form-desc">Follow 5 left-hand and 5 right-hand captures to enroll. PalmGate stores both palms so either hand can unlock.</p>
 
             <div class="field-group">
               <label class="field-label" for="userName">Full name</label>
@@ -275,17 +275,26 @@
             </div>
 
             <div class="registration-status" id="registrationStatus">
-              <div class="sample-title" id="regSampleTitle">Sample 1/7: Center palm</div>
-              <div class="sample-desc" id="regSampleDesc">Palm centered, vertical, fills about 55% of the frame.</div>
-              <div class="capture-counter-inline">Samples captured: <strong id="captureCounter">0 / 7</strong></div>
-              <div class="capture-dots" id="captureDots">
-                <span class="dot" data-i="0"></span>
-                <span class="dot" data-i="1"></span>
-                <span class="dot" data-i="2"></span>
-                <span class="dot" data-i="3"></span>
-                <span class="dot" data-i="4"></span>
-                <span class="dot" data-i="5"></span>
-                <span class="dot" data-i="6"></span>
+              <div class="sample-title" id="regSampleTitle">Left hand sample 1/5: Center palm</div>
+              <div class="sample-desc" id="regSampleDesc">Use your actual left hand: palm facing camera, fingers up, wrist visible.</div>
+              <div class="capture-counter-inline">Samples captured: <strong id="captureCounter">Left 0/5 · Right 0/5</strong></div>
+              <div class="capture-dots hand-dots" id="captureDots">
+                <div class="capture-dot-group" data-hand="left">
+                  <span class="dot-label">Left</span>
+                  <span class="dot" data-hand="left" data-i="0"></span>
+                  <span class="dot" data-hand="left" data-i="1"></span>
+                  <span class="dot" data-hand="left" data-i="2"></span>
+                  <span class="dot" data-hand="left" data-i="3"></span>
+                  <span class="dot" data-hand="left" data-i="4"></span>
+                </div>
+                <div class="capture-dot-group" data-hand="right">
+                  <span class="dot-label">Right</span>
+                  <span class="dot" data-hand="right" data-i="0"></span>
+                  <span class="dot" data-hand="right" data-i="1"></span>
+                  <span class="dot" data-hand="right" data-i="2"></span>
+                  <span class="dot" data-hand="right" data-i="3"></span>
+                  <span class="dot" data-hand="right" data-i="4"></span>
+                </div>
               </div>
               <ul class="quality-list" id="qualityList">
                 <li><span>Status</span><strong class="neutral">Enter name to start</strong></li>
@@ -293,7 +302,7 @@
             </div>
 
             <div class="register-hint" id="registerHint">
-              Enter a name, then start registration to capture 7 guided samples.
+              Enter a name, then start registration to capture 5 left-hand and 5 right-hand samples.
             </div>
 
             <div class="register-actions">

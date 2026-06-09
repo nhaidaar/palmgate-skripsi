@@ -11,9 +11,12 @@ from app.database import Database
 class FakePreprocessResult:
     def __init__(self, roi):
         self.roi = roi
+        self.rotation_degrees = 0.0
 
 
 class FakePreprocessor:
+    rembg_enabled = True
+
     def extract_full_hand_roi(self, frame):
         return FakePreprocessResult(frame[:, :, 0])
 

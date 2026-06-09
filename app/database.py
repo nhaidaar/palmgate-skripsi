@@ -29,6 +29,7 @@ class Database:
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id     INTEGER NOT NULL,
                 embedding   BLOB NOT NULL,
+                hand        TEXT NOT NULL DEFAULT 'unknown',
                 created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
@@ -54,8 +55,14 @@ class Database:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
+        self._ensure_user_embedding_metadata_columns()
         self._ensure_access_log_metadata_columns()
         self.conn.commit()
+
+    def _ensure_user_embedding_metadata_columns(self):
+        columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(user_embeddings)")}
+        if "hand" not in columns:
+            self.conn.execute("ALTER TABLE user_embeddings ADD COLUMN hand TEXT NOT NULL DEFAULT 'unknown'")
 
     def _ensure_access_log_metadata_columns(self):
         columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(access_logs)")}
@@ -69,6 +76,7 @@ class Database:
         name: str,
         embedding: np.ndarray,
         individual_embeddings: "list[np.ndarray] | None" = None,
+        embedding_hands: "list[str] | None" = None,
     ) -> int:
         cursor = self.conn.execute(
             "INSERT INTO users (name, embedding) VALUES (?, ?)",
@@ -76,9 +84,12 @@ class Database:
         )
         user_id = cursor.lastrowid
         if individual_embeddings:
+            hands = embedding_hands or ["unknown"] * len(individual_embeddings)
+            if len(hands) != len(individual_embeddings):
+                raise ValueError("embedding_hands must match individual_embeddings length")
             self.conn.executemany(
-                "INSERT INTO user_embeddings (user_id, embedding) VALUES (?, ?)",
-                [(user_id, e.tobytes()) for e in individual_embeddings],
+                "INSERT INTO user_embeddings (user_id, embedding, hand) VALUES (?, ?, ?)",
+                [(user_id, e.tobytes(), hand) for e, hand in zip(individual_embeddings, hands)],
             )
         self.conn.commit()
         return user_id
@@ -102,28 +113,33 @@ class Database:
         ).fetchall()
 
         indiv_rows = self.conn.execute(
-            "SELECT user_id, embedding FROM user_embeddings ORDER BY user_id, id"
+            "SELECT user_id, embedding, hand FROM user_embeddings ORDER BY user_id, id"
         ).fetchall()
 
-        # Build a map: user_id → [individual embeddings]
         indiv_map: dict[int, list] = {}
         for row in indiv_rows:
-            indiv_map.setdefault(row["user_id"], []).append(
-                np.frombuffer(row["embedding"], dtype=np.float32).copy()
-            )
+            indiv_map.setdefault(row["user_id"], []).append({
+                "embedding": np.frombuffer(row["embedding"], dtype=np.float32).copy(),
+                "hand": row["hand"],
+            })
 
         result = []
         for u in users:
             uid, name = u["id"], u["name"]
             if uid in indiv_map:
-                for emb in indiv_map[uid]:
-                    result.append({"id": uid, "name": name, "embedding": emb})
+                for item in indiv_map[uid]:
+                    result.append({
+                        "id": uid,
+                        "name": name,
+                        "embedding": item["embedding"],
+                        "hand": item["hand"],
+                    })
             else:
-                # Legacy user — fall back to averaged embedding
                 result.append({
                     "id": uid,
                     "name": name,
                     "embedding": np.frombuffer(u["embedding"], dtype=np.float32).copy(),
+                    "hand": "unknown",
                 })
         return result
 

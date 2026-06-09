@@ -5,6 +5,8 @@ from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app.config import REGISTRATION_CAPTURES_PER_HAND, REGISTRATION_HANDS, REGISTRATION_TOTAL_CAPTURES
+
 router = APIRouter(prefix="/api/device-registration")
 
 
@@ -17,6 +19,11 @@ class StartRegistrationResponse(BaseModel):
     name: str
     current_sample_index: int
     captured_count: int
+    required_per_hand: int
+    total_required: int
+    current_hand: str
+    left_count: int
+    right_count: int
 
 
 def _runtime():
@@ -25,6 +32,26 @@ def _runtime():
     if device_runtime is None:
         raise HTTPException(status_code=409, detail="USB device runtime is not enabled")
     return device_runtime
+
+
+def _hand_for_sample_index(index: int) -> str:
+    hand_index = index // REGISTRATION_CAPTURES_PER_HAND
+    return REGISTRATION_HANDS[min(hand_index, len(REGISTRATION_HANDS) - 1)]
+
+
+def _registration_progress(session) -> dict:
+    counts = {hand: 0 for hand in REGISTRATION_HANDS}
+    for i, sample in enumerate(session.captured_samples):
+        hand = sample.get("hand", _hand_for_sample_index(i))
+        if hand in counts:
+            counts[hand] += 1
+    return {
+        "required_per_hand": REGISTRATION_CAPTURES_PER_HAND,
+        "total_required": REGISTRATION_TOTAL_CAPTURES,
+        "current_hand": _hand_for_sample_index(session.current_sample_index),
+        "left_count": counts.get("left", 0),
+        "right_count": counts.get("right", 0),
+    }
 
 
 @router.post("/start", response_model=StartRegistrationResponse)
@@ -40,6 +67,7 @@ async def start_registration(req: StartRegistrationRequest):
         name=session.name,
         current_sample_index=session.current_sample_index,
         captured_count=len(session.captured_samples),
+        **_registration_progress(session),
     )
 
 
@@ -57,6 +85,7 @@ async def registration_status():
         "current_sample_index": session.current_sample_index,
         "captured_count": len(session.captured_samples),
         "guidance": session.last_guidance,
+        **_registration_progress(session),
     }
 
 

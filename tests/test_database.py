@@ -42,6 +42,31 @@ def test_get_all_embeddings(db):
     np.testing.assert_array_almost_equal(embeddings[0]["embedding"], emb, decimal=5)
 
 
+def test_add_user_stores_embedding_hand_labels(db):
+    emb1 = np.ones(4, dtype=np.float32)
+    emb2 = np.ones(4, dtype=np.float32) * 2
+
+    db.add_user(
+        "Alice",
+        emb1,
+        individual_embeddings=[emb1, emb2],
+        embedding_hands=["left", "right"],
+    )
+
+    embeddings = db.get_all_embeddings()
+    assert len(embeddings) == 2
+    assert embeddings[0]["hand"] == "left"
+    assert embeddings[1]["hand"] == "right"
+
+
+def test_get_all_embeddings_returns_unknown_hand_for_legacy_user(db):
+    emb = np.ones(4, dtype=np.float32)
+    db.add_user("Legacy", emb)
+
+    embeddings = db.get_all_embeddings()
+    assert embeddings[0]["hand"] == "unknown"
+
+
 def test_delete_user(db):
     emb = np.random.rand(1280).astype(np.float32)
     user_id = db.add_user("ToDelete", emb)
