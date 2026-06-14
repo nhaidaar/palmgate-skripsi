@@ -62,18 +62,8 @@ def test_get_embedding_from_notebook_frame_returns_none_when_preprocessing_fails
     assert result is None
 
 
-def test_get_embedding_from_notebook_frame_runs_inference(processor, monkeypatch):
-    class FakeResult:
-        model_input = np.ones((224, 224, 3), dtype=np.float32)
-
-    class FakeNotebookPreprocessor:
-        rembg_enabled = True
-
-        def extract_full_hand_roi(self, frame):
-            return FakeResult()
-
-    processor.notebook_preprocessor = FakeNotebookPreprocessor()
-    monkeypatch.setattr(processor, "_run_inference", lambda processed: np.ones(4, dtype=np.float32))
+def test_get_embedding_from_notebook_frame_uses_mediapipe_path(processor, monkeypatch):
+    monkeypatch.setattr(processor, "get_embedding", lambda frame, tta_enabled=False: np.ones(4, dtype=np.float32))
 
     result = processor.get_embedding_from_notebook_frame(np.zeros((480, 640, 3), dtype=np.uint8))
 
@@ -163,3 +153,85 @@ def test_registration_guidance_metrics_detects_clipped_hand(processor):
     )
 
     assert metrics["hand_clipped"] is True
+
+
+def test_run_inference_reads_final_output_and_normalizes(processor):
+    class FakeInterpreter:
+        def __init__(self):
+            self.input = None
+
+        def set_tensor(self, index, value):
+            assert index == 1
+            self.input = value
+
+        def invoke(self):
+            pass
+
+        def get_tensor(self, index):
+            assert index == 2
+            return np.array([[3.0, 4.0]], dtype=np.float32)
+
+    processor.interpreter = FakeInterpreter()
+    processor._input_index = 1
+    processor._output_index = 2
+    processor._embedding_dim = 2
+
+    result = processor._run_inference(np.zeros((224, 224, 3), dtype=np.float32))
+
+    np.testing.assert_allclose(result, np.array([0.6, 0.8], dtype=np.float32), rtol=1e-6)
+
+
+def test_get_embedding_from_notebook_frame_is_mediapipe_wrapper(processor, monkeypatch):
+    called = {"value": False}
+
+    def fake_get_embedding(frame, tta_enabled=False):
+        called["value"] = True
+        assert tta_enabled is True
+        return np.ones(2, dtype=np.float32)
+
+    monkeypatch.setattr(processor, "get_embedding", fake_get_embedding)
+
+    result = processor.get_embedding_from_notebook_frame(
+        np.zeros((480, 640, 3), dtype=np.uint8),
+        tta_enabled=True,
+    )
+
+    assert called["value"] is True
+    np.testing.assert_array_equal(result, np.ones(2, dtype=np.float32))
+
+
+def test_get_embedding_from_roi_does_not_apply_second_rotation(processor, monkeypatch):
+    roi = np.full((80, 80, 3), 120, dtype=np.uint8)
+    seen = {}
+
+    def fake_preprocess(value):
+        seen["roi"] = value.copy()
+        return np.zeros((224, 224, 3), dtype=np.float32)
+
+    monkeypatch.setattr(processor, "preprocess_roi", fake_preprocess)
+    monkeypatch.setattr(processor, "_run_inference_with_optional_tta", lambda processed, tta_enabled=False: np.ones(2, dtype=np.float32))
+
+    result = processor.get_embedding_from_roi(roi, rotation_angle=30.0, tta_enabled=False)
+
+    np.testing.assert_array_equal(seen["roi"], roi)
+    np.testing.assert_array_equal(result, np.ones(2, dtype=np.float32))
+
+
+def test_extract_palm_roi_rejects_small_palm_width(processor):
+    class FakeLandmarker:
+        def close(self):
+            pass
+
+        def detect(self, image):
+            return SimpleNamespace(hand_landmarks=[fake_landmarks({
+                0: (0.50, 0.80),
+                5: (0.50, 0.45),
+                9: (0.50, 0.42),
+                17: (0.51, 0.45),
+            })])
+
+    processor._hand_landmarker = FakeLandmarker()
+
+    result = processor.extract_palm_roi(np.full((100, 100, 3), 120, dtype=np.uint8))
+
+    assert result is None

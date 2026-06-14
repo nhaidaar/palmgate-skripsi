@@ -8,10 +8,14 @@ from mediapipe.tasks.python import vision as mp_vision
 from app.config import (
     CLAHE_CLIP_LIMIT,
     CLAHE_TILE_GRID,
+    EMBEDDING_DIM,
     HAND_LANDMARKER_PATH,
     IMG_SIZE,
+    MIN_PALM_WIDTH,
     MODEL_PATH,
     NOTEBOOK_REMBG_ENABLED,
+    PALM_ROI_SCALE,
+    TTA_ROTATIONS,
 )
 from app.notebook_preprocessing import NotebookPreprocessor
 
@@ -40,7 +44,8 @@ class PalmProcessor:
         )
         self.interpreter = None
         self._input_index = None
-        self._gap_output_index = None
+        self._output_index = None
+        self._embedding_dim = EMBEDDING_DIM
         self._hand_landmarker = None
         self.notebook_preprocessor = NotebookPreprocessor(rembg_enabled=NOTEBOOK_REMBG_ENABLED)
 
@@ -66,7 +71,7 @@ class PalmProcessor:
             self.notebook_preprocessor._get_rembg_session()
 
     def _load_model(self, model_path):
-        kwargs = {"model_path": str(model_path), "experimental_preserve_all_tensors": True}
+        kwargs = {"model_path": str(model_path)}
         try:
             from tflite_runtime.interpreter import Interpreter
             self.interpreter = Interpreter(num_threads=4, **kwargs)
@@ -74,7 +79,6 @@ class PalmProcessor:
             import tensorflow as tf
             self.interpreter = tf.lite.Interpreter(num_threads=4, **kwargs)
         except TypeError:
-            # Older tflite_runtime without num_threads
             try:
                 from tflite_runtime.interpreter import Interpreter
                 self.interpreter = Interpreter(**kwargs)
@@ -83,32 +87,18 @@ class PalmProcessor:
                 self.interpreter = tf.lite.Interpreter(**kwargs)
 
         self.interpreter.allocate_tensors()
-
         input_details = self.interpreter.get_input_details()
+        output_details = self.interpreter.get_output_details()
         self._input_index = input_details[0]["index"]
+        self._output_index = output_details[0]["index"]
 
-        # Find the GlobalAveragePooling2D output (1280-dim) before the Dense head.
-        # experimental_preserve_all_tensors=True is required to read this after invoke().
-        tensor_details = self.interpreter.get_tensor_details()
-        gap_candidates = []
-        for t in tensor_details:
-            shape = t.get("shape", [])
-            if hasattr(shape, "tolist"):
-                shape = shape.tolist()
-            if shape == [1, 1280]:
-                gap_candidates.append(t["index"])
-
-        if gap_candidates:
-            # Use the last 1280-dim tensor found (closest to the output head)
-            self._gap_output_index = gap_candidates[-1]
-            log.info("MODEL | GAP embedding tensor index=%d  (found %d candidate/s)",
-                     self._gap_output_index, len(gap_candidates))
-        else:
-            # Fallback: use the final softmax output as a coarse embedding
-            output_details = self.interpreter.get_output_details()
-            self._gap_output_index = output_details[0]["index"]
-            log.warning("MODEL | GAP tensor not found — using softmax output (dim=%s) as embedding",
-                        output_details[0]["shape"].tolist())
+        shape = output_details[0].get("shape", [])
+        if hasattr(shape, "tolist"):
+            shape = shape.tolist()
+        if len(shape) != 2 or int(shape[-1]) <= 0:
+            raise RuntimeError(f"Embedding model must output [1, dim], got {shape}")
+        self._embedding_dim = int(shape[-1])
+        log.info("MODEL | embedding output index=%d dim=%d", self._output_index, self._embedding_dim)
 
     def extract_palm_roi(self, frame_rgb: np.ndarray):
         if self._hand_landmarker is None:
@@ -143,9 +133,9 @@ class PalmProcessor:
 
         landmarks = result.hand_landmarks[0]
 
-        wrist      = landmarks[WRIST]
-        index_mcp  = landmarks[INDEX_FINGER_MCP]
-        pinky_mcp  = landmarks[PINKY_MCP]
+        wrist = landmarks[WRIST]
+        index_mcp = landmarks[INDEX_FINGER_MCP]
+        pinky_mcp = landmarks[PINKY_MCP]
         middle_mcp = landmarks[MIDDLE_FINGER_MCP]
 
         log.debug("DETECT | wrist=(%.3f,%.3f)  index_mcp=(%.3f,%.3f)"
@@ -155,53 +145,43 @@ class PalmProcessor:
                   pinky_mcp.x, pinky_mcp.y,
                   middle_mcp.x, middle_mcp.y)
 
-        # ── Rotation normalisation ────────────────────────────────
-        # The training pipeline (calculate_roi in the notebook) rotates each
-        # frame so the index-MCP → pinky-MCP knuckle line is horizontal before
-        # cropping.  We replicate that here using the same landmarks so the ROI
-        # fed to the model matches the distribution it was trained on.
-        dx = (pinky_mcp.x - index_mcp.x) * w
-        dy = (pinky_mcp.y - index_mcp.y) * h
-        theta_deg = float(np.degrees(np.arctan2(dy, dx)))
+        def _point(index):
+            landmark = landmarks[index]
+            return np.array([landmark.x * w, landmark.y * h], dtype=np.float32)
 
-        knuckle_cx = int((index_mcp.x + pinky_mcp.x) / 2 * w)
-        knuckle_cy = int((index_mcp.y + pinky_mcp.y) / 2 * h)
-        R = cv2.getRotationMatrix2D((knuckle_cx, knuckle_cy), theta_deg, 1.0)
-        frame_rot = cv2.warpAffine(frame_rgb, R, (w, h), flags=cv2.INTER_LINEAR)
+        wrist_pt = _point(WRIST)
+        index_pt = _point(INDEX_FINGER_MCP)
+        middle_pt = _point(MIDDLE_FINGER_MCP)
+        pinky_pt = _point(PINKY_MCP)
 
-        log.debug("DETECT | knuckle rotation theta=%.1f°  center=(%d,%d)",
-                  theta_deg, knuckle_cx, knuckle_cy)
+        palm_width = float(np.linalg.norm(index_pt - pinky_pt))
+        if palm_width < MIN_PALM_WIDTH:
+            log.warning("DETECT | palm too small width=%.1fpx", palm_width)
+            return None
 
-        # Project landmark coords into the rotated frame
-        def _rot_pt(lm):
-            x_px = lm.x * w
-            y_px = lm.y * h
-            rx = R[0, 0] * x_px + R[0, 1] * y_px + R[0, 2]
-            ry = R[1, 0] * x_px + R[1, 1] * y_px + R[1, 2]
-            return rx, ry
+        angle = float(np.degrees(np.arctan2(pinky_pt[1] - index_pt[1], pinky_pt[0] - index_pt[0])))
+        center = (wrist_pt + middle_pt) / 2.0
+        rotation = cv2.getRotationMatrix2D((float(center[0]), float(center[1])), angle, 1.0)
+        rotated = cv2.warpAffine(frame_rgb, rotation, (w, h), flags=cv2.INTER_LINEAR)
 
-        mid_rx, mid_ry = _rot_pt(middle_mcp)
-        wrist_rx, wrist_ry = _rot_pt(wrist)
-        idx_rx,  idx_ry  = _rot_pt(index_mcp)
-        pnk_rx,  pnk_ry  = _rot_pt(pinky_mcp)
+        half = (palm_width * PALM_ROI_SCALE) / 2.0
+        cx, cy = float(center[0]), float(center[1])
+        x1, y1 = int(max(0, cx - half)), int(max(0, cy - half))
+        x2, y2 = int(min(w, cx + half)), int(min(h, cy + half))
 
-        cx = int(mid_rx)
-        cy = int((mid_ry + wrist_ry) / 2)
+        log.debug(
+            "DETECT | palm_width=%.1fpx angle=%.1f center=(%.1f,%.1f) box=[%d:%d, %d:%d]",
+            palm_width,
+            angle,
+            cx,
+            cy,
+            y1,
+            y2,
+            x1,
+            x2,
+        )
 
-        palm_width = abs(int(idx_rx - pnk_rx))
-        roi_size = max(int(palm_width * 1.5), 60)
-        half = roi_size // 2
-
-        x1 = max(0, cx - half)
-        y1 = max(0, cy - half)
-        x2 = min(w, cx + half)
-        y2 = min(h, cy + half)
-
-        log.debug("DETECT | palm_width=%dpx  roi_size=%dpx  center=(%d,%d)"
-                  "  box=[%d:%d, %d:%d]",
-                  palm_width, roi_size, cx, cy, y1, y2, x1, x2)
-
-        roi = frame_rot[y1:y2, x1:x2]
+        roi = rotated[y1:y2, x1:x2]
         if roi.size == 0:
             log.warning("DETECT | ROI is empty after crop — hand may be at image edge")
             return None
@@ -219,24 +199,17 @@ class PalmProcessor:
         resized = cv2.resize(rgb, IMG_SIZE, interpolation=cv2.INTER_CUBIC)
         return resized.astype(np.float32)
 
-    def get_embedding(self, frame_rgb: np.ndarray):
+    def get_embedding(self, frame_rgb: np.ndarray, tta_enabled: bool = False):
         roi = self.extract_palm_roi(frame_rgb)
         if roi is None:
             return None
         processed = self.preprocess_roi(roi)
-        return self._run_inference(processed)
+        return self._run_inference_with_optional_tta(processed, tta_enabled=tta_enabled)
 
-    def get_embedding_from_notebook_frame(self, frame_rgb: np.ndarray):
-        # When rembg is disabled, the threshold-based notebook preprocessing
-        # produces garbage (thresholds entire scene, not just hand). Fall back
-        # to MediaPipe-based ROI extraction which works reliably.
-        if not self.notebook_preprocessor.rembg_enabled:
-            return self.get_embedding(frame_rgb)
-
-        result = self.notebook_preprocessor.extract_full_hand_roi(frame_rgb)
-        if result is None:
-            return None
-        return self._run_inference(result.model_input)
+    def get_embedding_from_notebook_frame(self, frame_rgb: np.ndarray, tta_enabled: bool = False):
+        # Compatibility wrapper: the new embedding model was trained on MediaPipe ROI,
+        # not the old rembg/FFT notebook preprocessing path.
+        return self.get_embedding(frame_rgb, tta_enabled=tta_enabled)
 
     def get_registration_guidance_metrics(self, frame_rgb: np.ndarray, previous_metrics: dict | None = None):
         gray = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2GRAY)
@@ -303,43 +276,59 @@ class PalmProcessor:
             )
         return metrics
 
-    def get_embedding_from_roi(self, roi_rgb: np.ndarray, rotation_angle: float = 0.0):
-        """Process a pre-extracted palm ROI, skipping hand detection.
-
-        The browser already runs MediaPipe in VIDEO mode and can crop the ROI
-        client-side, eliminating the slow server-side detection round-trip.
-
-        rotation_angle: knuckle-line angle (degrees) computed by the browser from
-        the index-MCP → pinky-MCP vector.  The ROI is rotated to cancel this tilt
-        so the preprocessing matches the training pipeline (calculate_roi in the
-        notebook always aligns the knuckle line to horizontal before cropping).
-        """
+    def get_embedding_from_roi(
+        self,
+        roi_rgb: np.ndarray,
+        rotation_angle: float = 0.0,
+        tta_enabled: bool = False,
+    ):
+        """Process a pre-extracted, already-aligned palm ROI from the browser."""
         if roi_rgb is None or roi_rgb.size == 0:
             log.warning("DETECT | received empty ROI from client")
             return None
 
-        log.info("DETECT | using client-side ROI  shape=%s  rotation=%.1f°",
-                 roi_rgb.shape, rotation_angle)
+        log.info("DETECT | using client-side ROI  shape=%s", roi_rgb.shape)
+        processed = self.preprocess_roi(roi_rgb)
+        return self._run_inference_with_optional_tta(processed, tta_enabled=tta_enabled)
 
-        roi = roi_rgb
-        if abs(rotation_angle) > 0.5:
-            h, w = roi.shape[:2]
-            cx, cy = w / 2.0, h / 2.0
-            R = cv2.getRotationMatrix2D((cx, cy), rotation_angle, 1.0)
-            roi = cv2.warpAffine(roi, R, (w, h), flags=cv2.INTER_LINEAR)
+    def _normalize_embedding(self, embedding: np.ndarray) -> np.ndarray:
+        vector = np.asarray(embedding, dtype=np.float32).reshape(-1)
+        norm = float(np.linalg.norm(vector))
+        if norm == 0.0:
+            return vector
+        return (vector / norm).astype(np.float32)
 
-        processed = self.preprocess_roi(roi)
-        return self._run_inference(processed)
+    def _rotate_model_input(self, processed: np.ndarray, angle_degrees: float) -> np.ndarray:
+        if abs(angle_degrees) < 1e-6:
+            return processed
+        h, w = processed.shape[:2]
+        matrix = cv2.getRotationMatrix2D((w / 2.0, h / 2.0), angle_degrees, 1.0)
+        return cv2.warpAffine(
+            processed,
+            matrix,
+            (w, h),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=(0, 0, 0),
+        ).astype(np.float32)
+
+    def _run_inference_with_optional_tta(self, processed: np.ndarray, tta_enabled: bool = False) -> np.ndarray:
+        if not tta_enabled:
+            return self._run_inference(processed)
+        embeddings = [self._run_inference(self._rotate_model_input(processed, angle)) for angle in TTA_ROTATIONS]
+        return self._normalize_embedding(np.mean(embeddings, axis=0))
 
     def _run_inference(self, processed: np.ndarray) -> np.ndarray:
         if self.interpreter is None:
             raise RuntimeError("TFLite model not loaded")
+        if self._output_index is None:
+            raise RuntimeError("TFLite model output tensor not configured")
 
-        input_data = np.expand_dims(processed, axis=0)
+        input_data = np.expand_dims(processed.astype(np.float32), axis=0)
         self.interpreter.set_tensor(self._input_index, input_data)
         self.interpreter.invoke()
-        embedding = self.interpreter.get_tensor(self._gap_output_index)[0]
-        return embedding.copy()
+        embedding = self.interpreter.get_tensor(self._output_index)[0]
+        return self._normalize_embedding(embedding)
 
     def compute_similarity(self, embedding: np.ndarray, stored_embeddings: list, threshold: float) -> dict:
         if not stored_embeddings:
