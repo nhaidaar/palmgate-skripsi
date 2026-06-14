@@ -37,7 +37,6 @@ services:
       # Browser mode: use a phone/laptop camera through the web UI.
       - DEVICE_RUNTIME_ENABLED=0
       - CAMERA_SOURCE=browser
-      - NOTEBOOK_REMBG_ENABLED=0
 
   palmgate-usb:
     <<: *palmgate-common
@@ -51,8 +50,6 @@ services:
       - CAMERA_DEVICE_PATH=/dev/video1
       - DEVICE_PREVIEW_FRAME_INTERVAL_MS=33
       - DEVICE_FRAME_INTERVAL_MS=250
-      - NOTEBOOK_REMBG_ENABLED=0
-      - NOTEBOOK_REMBG_MODEL=silueta
     devices:
       - /dev/v4l/by-id/usb-046d_C270_HD_WEBCAM_4DEFC680-video-index0:/dev/video1
 

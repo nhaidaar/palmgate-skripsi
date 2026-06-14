@@ -1,17 +1,20 @@
 from pathlib import Path
 
 
-def test_docker_requirements_include_notebook_preprocessing_dependencies():
+def test_docker_requirements_use_active_runtime_dependencies():
     requirements = Path("requirements.docker.txt").read_text()
 
-    assert "rembg" in requirements
-    assert "onnxruntime" in requirements
+    assert "mediapipe" in requirements
+    assert "opencv-python-headless" in requirements
+    assert "tflite-runtime" in requirements
+    assert "rembg" not in requirements
+    assert "onnxruntime" not in requirements
 
 
-def test_browser_compose_disables_rembg_for_sbc_cpu_runtime():
+def test_compose_does_not_configure_old_notebook_rembg_path():
     compose = Path("docker-compose.yml").read_text()
 
-    assert "NOTEBOOK_REMBG_ENABLED=0" in compose
+    assert "NOTEBOOK_REMBG" not in compose
 
 
 def test_usb_compose_uses_logitech_camera_device_path():
@@ -19,7 +22,6 @@ def test_usb_compose_uses_logitech_camera_device_path():
 
     assert "CAMERA_SOURCE=usb" in compose
     assert "CAMERA_DEVICE_PATH=/dev/video1" in compose
-    assert "NOTEBOOK_REMBG_ENABLED=0" in compose
     assert "/dev/v4l/by-id/usb-046d_C270_HD_WEBCAM_4DEFC680-video-index0:/dev/video1" in compose
 
 

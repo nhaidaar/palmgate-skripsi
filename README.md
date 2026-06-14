@@ -114,13 +114,21 @@ You can bootstrap temporary users from named full-hand images in `seeds/`:
 python scripts/seed_users.py seeds
 ```
 
-Each image or folder label must use `nim_name` format, for example `12345_Naufal.jpg`. The script uses the same MediaPipe embedding path as runtime and stores a template for test seeding. Existing users are skipped by default and access logs are preserved. To replace registered users while keeping logs:
+Each image or folder label must use `nim_name` format, for example `12345_Naufal.jpg`. For the local `Dataset_Webcam/` test-only folders that do not include NIMs, use:
+
+```bash
+python scripts/seed_users.py Dataset_Webcam --replace-users --auto-demo-nim
+```
+
+This generates stable demo NIMs such as `SEED-001`; do not use that flag for production enrollment.
+
+The script uses the same MediaPipe embedding path as runtime and stores a template for test seeding. Existing users are skipped by default and access logs are preserved. To replace registered users while keeping logs:
 
 ```bash
 python scripts/seed_users.py seeds --replace-users
 ```
 
-Seeded users are for initial testing only. Re-register users with the USB 7-sample flow before using the system for a real door lock.
+Seeded users are for initial testing only. Re-register users with the USB two-hand flow before using the system for a real door lock.
 
 ## Orange Pi workflow
 

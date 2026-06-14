@@ -47,8 +47,8 @@ USB registration captures 5 samples per hand, stores one normalized template per
 - `app/main.py`: FastAPI entry point, lifespan management
 - `app/device_runtime.py`: USB camera worker with hold-to-scan and registration state machine
 - `app/palm_processor.py`: MediaPipe detection, CLAHE enhancement, TFLite inference
-- `app/notebook_preprocessing.py`: Production preprocessing (rembg + FFT valley detection)
-- `app/services/registration_quality.py`: 7-sample guidance targets (center, closer, farther, rotate, shift)
+- `app/notebook_preprocessing.py`: Legacy rembg/FFT ROI reference path (not active runtime)
+- `app/services/registration_quality.py`: 5 guidance targets per hand (center, closer, farther, rotate, shift)
 - `app/database.py`: SQLite with users, user_embeddings, access_logs, device_status tables
 
 ### Environment Variables
@@ -60,7 +60,7 @@ USB registration captures 5 samples per hand, stores one normalized template per
 | `CAMERA_DEVICE_INDEX` | `0` | USB camera index |
 | `CAMERA_DEVICE_PATH` | - | Override camera path (e.g., `/dev/video0`) |
 | `DB_PATH` | `palmprint.db` | SQLite database location |
-| `NOTEBOOK_REMBG_ENABLED` | `1` | Enable background removal |
+| `NOTEBOOK_REMBG_ENABLED` | `1` | Legacy notebook preprocessing only; inactive runtime path |
 
 ## Required Model Files
 

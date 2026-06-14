@@ -15,6 +15,11 @@ def main():
     parser.add_argument("seed_dir", nargs="?", default="seeds")
     parser.add_argument("--db", default=str(DB_PATH))
     parser.add_argument("--replace-users", action="store_true")
+    parser.add_argument(
+        "--auto-demo-nim",
+        action="store_true",
+        help="Testing only: accept plain labels and generate stable SEED-001 demo NIMs.",
+    )
     args = parser.parse_args()
 
     db = Database(args.db)
@@ -25,6 +30,7 @@ def main():
             db,
             palm_processor,
             replace_users=args.replace_users,
+            auto_demo_nim=args.auto_demo_nim,
         )
         for name in summary.created:
             print(f"CREATED {name}")

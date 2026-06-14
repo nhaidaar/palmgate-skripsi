@@ -7,6 +7,9 @@ import numpy as np
 from app.database import Database
 
 
+ROOT = Path(__file__).resolve().parent.parent
+
+
 class FakePalmProcessor:
     def get_embedding(self, frame_rgb, tta_enabled=False):
         value = float(frame_rgb[0, 0, 0])
@@ -172,9 +175,10 @@ def test_seed_users_requires_nim_name_label(tmp_path):
 
 def test_seed_script_can_be_executed_directly():
     result = subprocess.run(
-        [sys.executable, "scripts/seed_users.py", "--help"],
+        [sys.executable, str(ROOT / "scripts" / "seed_users.py"), "--help"],
         capture_output=True,
         text=True,
+        cwd=ROOT,
     )
 
     assert result.returncode == 0
@@ -182,7 +186,64 @@ def test_seed_script_can_be_executed_directly():
 
 
 def test_seed_script_loads_hand_model_for_runtime_preprocessing():
-    source = Path("scripts/seed_users.py").read_text()
+    source = (ROOT / "scripts" / "seed_users.py").read_text()
 
     assert "PalmProcessor()" in source
     assert "NotebookPreprocessor" not in source
+
+
+def test_seed_users_plain_folders_fail_without_auto_demo_nim(tmp_path):
+    from app.services.seed_users import seed_users_from_directory
+
+    seed_dir = tmp_path / "Dataset_Webcam"
+    seed_dir.mkdir()
+    person_dir = seed_dir / "Afrizal"
+    person_dir.mkdir()
+    (person_dir / "capture_0.jpg").write_bytes(b"image")
+    db = Database(tmp_path / "palmprint.db")
+
+    summary = seed_users_from_directory(
+        seed_dir,
+        db,
+        FakePalmProcessor(),
+        read_image=lambda path: np.full((80, 80, 3), 10, dtype=np.uint8),
+    )
+
+    assert summary.created == []
+    assert "Afrizal" in summary.failed
+    assert "nim_name" in summary.failed["Afrizal"]
+
+
+def test_seed_users_plain_folders_use_stable_demo_nims_when_enabled(tmp_path):
+    from app.services.seed_users import seed_users_from_directory
+
+    seed_dir = tmp_path / "Dataset_Webcam"
+    seed_dir.mkdir()
+    for name in ["Afrizal", "Naufal", "Reza", "Rizky"]:
+        person_dir = seed_dir / name
+        person_dir.mkdir()
+        for index in range(2):
+            (person_dir / f"capture_{index}.jpg").write_bytes(b"image")
+
+    db = Database(tmp_path / "palmprint.db")
+
+    summary = seed_users_from_directory(
+        seed_dir,
+        db,
+        FakePalmProcessor(),
+        auto_demo_nim=True,
+        read_image=lambda path: np.full((80, 80, 3), 10 + len(path.parent.name), dtype=np.uint8),
+    )
+
+    assert summary.created == ["Afrizal", "Naufal", "Reza", "Rizky"]
+    assert summary.failed == {}
+    assert [user["nim"] for user in db.get_all_users()] == ["SEED-001", "SEED-002", "SEED-003", "SEED-004"]
+    assert [user["name"] for user in db.get_all_users()] == ["Afrizal", "Naufal", "Reza", "Rizky"]
+    assert [entry["hand"] for entry in db.get_all_embeddings()] == ["unknown", "unknown", "unknown", "unknown"]
+
+
+def test_seed_script_exposes_auto_demo_nim_flag():
+    source = (ROOT / "scripts" / "seed_users.py").read_text()
+
+    assert "--auto-demo-nim" in source
+    assert "auto_demo_nim=args.auto_demo_nim" in source
