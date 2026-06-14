@@ -6,7 +6,7 @@ import numpy as np
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.config import SIMILARITY_THRESHOLD
+from app.config import RECOGNITION_TTA_ENABLED, SIMILARITY_THRESHOLD
 from app.services.recognition_service import match_embedding_and_log
 
 log = logging.getLogger("palmgate")
@@ -51,11 +51,17 @@ async def recognize(req: RecognizeRequest):
         raise HTTPException(status_code=400, detail="Invalid image data")
 
     if req.is_roi:
-        log.debug("RECOGNIZE | using pre-cropped client ROI — skipping server detection  angle=%.1f°",
-                  req.rotation_angle)
-        embedding = palm_processor.get_embedding_from_roi(frame, req.rotation_angle)
+        log.debug("RECOGNIZE | using pre-cropped client ROI — skipping server detection")
+        embedding = palm_processor.get_embedding_from_roi(
+            frame,
+            req.rotation_angle,
+            tta_enabled=RECOGNITION_TTA_ENABLED,
+        )
     else:
-        embedding = palm_processor.get_embedding_from_notebook_frame(frame)
+        embedding = palm_processor.get_embedding_from_notebook_frame(
+            frame,
+            tta_enabled=RECOGNITION_TTA_ENABLED,
+        )
 
     if embedding is None:
         log.warning("RECOGNIZE | returning 422 — no hand detected in frame")
