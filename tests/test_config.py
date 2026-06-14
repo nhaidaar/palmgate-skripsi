@@ -32,3 +32,38 @@ def test_notebook_rembg_env_override(monkeypatch):
     importlib.reload(config)
 
     assert config.NOTEBOOK_REMBG_ENABLED is False
+
+
+def test_embedding_model_defaults(monkeypatch):
+    monkeypatch.delenv("MODEL_PATH", raising=False)
+    monkeypatch.delenv("MODEL_METADATA_PATH", raising=False)
+    monkeypatch.delenv("SIMILARITY_THRESHOLD", raising=False)
+    monkeypatch.delenv("EMBEDDING_DIM", raising=False)
+
+    import app.config as config
+    importlib.reload(config)
+
+    assert config.MODEL_PATH.name == "palm_embedding.tflite"
+    assert config.EMBEDDING_DIM == 128
+    assert config.SIMILARITY_THRESHOLD == 0.745932400226593
+    assert config.TTA_ROTATIONS == (0.0, -6.0, 6.0)
+    assert config.ENROLLMENT_TTA_ENABLED is True
+    assert config.RECOGNITION_TTA_ENABLED is False
+
+
+def test_model_metadata_overrides_threshold_and_dim(tmp_path, monkeypatch):
+    metadata = tmp_path / "model_metadata.json"
+    metadata.write_text(
+        '{"embedding_dim": 64, "operating_threshold": 0.8123, "tta_rotations": [0, -3, 3]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MODEL_METADATA_PATH", str(metadata))
+    monkeypatch.delenv("SIMILARITY_THRESHOLD", raising=False)
+    monkeypatch.delenv("EMBEDDING_DIM", raising=False)
+
+    import app.config as config
+    importlib.reload(config)
+
+    assert config.EMBEDDING_DIM == 64
+    assert config.SIMILARITY_THRESHOLD == 0.8123
+    assert config.TTA_ROTATIONS == (0.0, -3.0, 3.0)
