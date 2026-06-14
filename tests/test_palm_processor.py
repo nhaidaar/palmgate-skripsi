@@ -235,3 +235,31 @@ def test_extract_palm_roi_rejects_small_palm_width(processor):
     result = processor.extract_palm_roi(np.full((100, 100, 3), 120, dtype=np.uint8))
 
     assert result is None
+
+
+def test_compute_similarity_skips_incompatible_embedding_dimensions(processor):
+    result = processor.compute_similarity(
+        np.ones(128, dtype=np.float32),
+        [{"id": 1, "name": "Old", "embedding": np.ones(1280, dtype=np.float32)}],
+        threshold=0.7,
+    )
+
+    assert result["status"] == "DENIED"
+    assert result["closest_match"] is None
+    assert result["similarity"] == 0.0
+
+
+def test_compute_similarity_matches_compatible_template(processor):
+    result = processor.compute_similarity(
+        np.array([1.0, 0.0], dtype=np.float32),
+        [
+            {"id": 1, "name": "Alice", "embedding": np.array([1.0, 0.0], dtype=np.float32), "hand": "left"},
+            {"id": 2, "name": "Bob", "embedding": np.array([0.0, 1.0], dtype=np.float32), "hand": "right"},
+        ],
+        threshold=0.7,
+    )
+
+    assert result["status"] == "ALLOWED"
+    assert result["name"] == "Alice"
+    assert result["user_id"] == 1
+    assert result["similarity"] == 1.0

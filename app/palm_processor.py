@@ -340,22 +340,36 @@ class PalmProcessor:
                 "user_id": None,
             }
 
+        query = self._normalize_embedding(embedding)
         best_score = -1.0
         best_match = None
         best_user_id = None
 
-        norm_a = np.linalg.norm(embedding)
-
         for entry in stored_embeddings:
-            stored = entry["embedding"]
-            norm_b = np.linalg.norm(stored)
-            if norm_a == 0 or norm_b == 0:
+            stored = np.asarray(entry["embedding"], dtype=np.float32).reshape(-1)
+            if stored.shape != query.shape:
+                log.warning(
+                    "MATCH | skipped incompatible embedding dim stored=%d query=%d user=%s",
+                    stored.shape[0],
+                    query.shape[0],
+                    entry.get("name"),
+                )
                 continue
-            score = float(np.dot(embedding, stored) / (norm_a * norm_b))
+            stored = self._normalize_embedding(stored)
+            score = float(np.dot(query, stored))
             if score > best_score:
                 best_score = score
                 best_match = entry["name"]
                 best_user_id = entry["id"]
+
+        if best_score < 0.0:
+            return {
+                "status": "DENIED",
+                "name": "Unknown",
+                "similarity": 0.0,
+                "closest_match": None,
+                "user_id": None,
+            }
 
         if best_score >= threshold:
             return {
