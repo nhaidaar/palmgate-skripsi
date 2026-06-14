@@ -9,9 +9,24 @@ def test_start_device_registration_requires_runtime(monkeypatch):
     monkeypatch.setattr(main, "device_runtime", None)
     client = TestClient(app)
 
-    response = client.post("/api/device-registration/start", json={"name": "Alice"})
+    response = client.post("/api/device-registration/start", json={"nim": "12345", "name": "Alice"})
 
     assert response.status_code == 409
+
+
+def test_start_registration_requires_nim(monkeypatch):
+    import app.main as main
+
+    class FakeRuntime:
+        pass
+
+    monkeypatch.setattr(main, "device_runtime", FakeRuntime())
+    client = TestClient(app)
+
+    response = client.post("/api/device-registration/start", json={"name": "Alice"})
+
+    assert response.status_code == 400
+    assert "NIM is required" in response.json()["detail"]
 
 
 def test_start_device_registration_returns_session(monkeypatch):
@@ -19,22 +34,30 @@ def test_start_device_registration_returns_session(monkeypatch):
 
     class FakeSession:
         id = "session-1"
+        nim = "12345"
         name = "Alice"
         current_sample_index = 0
         captured_samples = []
 
     class FakeRuntime:
-        def start_registration(self, name):
+        def __init__(self):
+            self.started = None
+
+        def start_registration(self, nim, name):
+            self.started = (nim, name)
             return FakeSession()
 
-    monkeypatch.setattr(main, "device_runtime", FakeRuntime())
+    runtime = FakeRuntime()
+    monkeypatch.setattr(main, "device_runtime", runtime)
     client = TestClient(app)
 
-    response = client.post("/api/device-registration/start", json={"name": "Alice"})
+    response = client.post("/api/device-registration/start", json={"nim": "12345", "name": "Alice"})
 
     assert response.status_code == 200
     data = response.json()
     assert data["session_id"] == "session-1"
+    assert data["nim"] == "12345"
+    assert runtime.started == ("12345", "Alice")
     assert data["total_required"] == 10
     assert data["required_per_hand"] == 5
     assert data["current_hand"] == "left"
@@ -47,6 +70,7 @@ def test_device_registration_status_returns_session(monkeypatch):
 
     class FakeSession:
         id = "session-1"
+        nim = "12345"
         name = "Alice"
         current_sample_index = 2
         captured_samples = [{"hand": "left"}, {"hand": "left"}]

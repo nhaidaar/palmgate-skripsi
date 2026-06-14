@@ -17,21 +17,23 @@ from app.config import (
     DEVICE_HOLD_MS,
     DEVICE_STATUS_HEARTBEAT_MS,
     DUPLICATE_THRESHOLD,
+    ENROLLMENT_TTA_ENABLED,
+    RECOGNITION_TTA_ENABLED,
     REGISTRATION_CAPTURES_PER_HAND,
     REGISTRATION_HANDS,
     REGISTRATION_MIN_VALID_PER_HAND,
-    REGISTRATION_STORE_EMBEDDINGS_PER_HAND,
     REGISTRATION_TOTAL_CAPTURES,
     SIMILARITY_THRESHOLD,
 )
+from app.services.embedding_templates import build_hand_templates, overall_template
 from app.services.recognition_service import match_embedding_and_log
 from app.services.registration_quality import SAMPLE_TARGETS, evaluate_guidance
-from app.services.registration_ranking import RegistrationSample, rank_registration_samples
 
 
 @dataclass
 class DeviceRegistrationSession:
     id: str
+    nim: str
     name: str
     current_sample_index: int = 0
     captured_samples: list = field(default_factory=list)
@@ -148,10 +150,20 @@ class DeviceRuntime:
             return None
         return encoded.tobytes()
 
-    def start_registration(self, name: str):
+    def start_registration(self, nim: str, name: str):
         if self.registration_session is not None:
             raise RuntimeError("Registration already active")
-        self.registration_session = DeviceRegistrationSession(id=str(uuid.uuid4()), name=name.strip())
+        clean_nim = nim.strip()
+        clean_name = name.strip()
+        if not clean_nim:
+            raise RuntimeError("NIM is required")
+        if not clean_name:
+            raise RuntimeError("Name is required")
+        self.registration_session = DeviceRegistrationSession(
+            id=str(uuid.uuid4()),
+            nim=clean_nim,
+            name=clean_name,
+        )
         self.worker_state = "registration_active"
         self.hand_seen_since_ms = None
         self.cooldown_until_ms = 0
@@ -170,9 +182,12 @@ class DeviceRuntime:
         if not guidance or not guidance.get("acceptable", False):
             raise RuntimeError("Frame does not satisfy guidance")
         frame = self._read_frame()
-        embedding = self.palm_processor.get_embedding_from_notebook_frame(frame)
+        embedding = self.palm_processor.get_embedding_from_notebook_frame(
+            frame,
+            tta_enabled=ENROLLMENT_TTA_ENABLED,
+        )
         if embedding is None:
-            raise RuntimeError("Notebook preprocessing failed")
+            raise RuntimeError("Palm preprocessing failed")
         sample_index = self.registration_session.current_sample_index
         sample = {
             "sample_index": sample_index,
@@ -188,53 +203,50 @@ class DeviceRuntime:
         if self.registration_session is None:
             raise RuntimeError("No registration active")
 
-        grouped: dict[str, list[RegistrationSample]] = {hand: [] for hand in REGISTRATION_HANDS}
+        samples = []
         for item in self.registration_session.captured_samples:
-            hand = item.get("hand", self._hand_for_sample_index(item["sample_index"]))
-            if hand in grouped:
-                grouped[hand].append(
-                    RegistrationSample(
-                        sample_index=item["sample_index"],
-                        quality_score=item["quality_score"],
-                        embedding=item["embedding"],
-                    )
-                )
+            samples.append({
+                "hand": item.get("hand", self._hand_for_sample_index(item["sample_index"])),
+                "embedding": item["embedding"],
+            })
 
-        ranked_by_hand = {}
-        for hand in REGISTRATION_HANDS:
-            ranked = rank_registration_samples(
-                grouped[hand],
-                keep=REGISTRATION_STORE_EMBEDDINGS_PER_HAND,
-                min_similarity=self.threshold,
+        try:
+            templates = build_hand_templates(
+                samples,
+                required_hands=REGISTRATION_HANDS,
+                min_per_hand=REGISTRATION_MIN_VALID_PER_HAND,
             )
-            if len(ranked) < REGISTRATION_MIN_VALID_PER_HAND:
-                raise RuntimeError("Not enough valid registration samples")
-            ranked_by_hand[hand] = ranked
+        except ValueError:
+            raise RuntimeError("Not enough valid registration samples")
 
-        embeddings = []
-        embedding_hands = []
-        for hand in REGISTRATION_HANDS:
-            for sample in ranked_by_hand[hand]:
-                embeddings.append(sample.embedding.astype(np.float32))
-                embedding_hands.append(hand)
+        embedding_hands = list(templates.keys())
+        embeddings = [templates[hand].astype(np.float32) for hand in embedding_hands]
+        avg_embedding = overall_template(templates)
 
-        avg_embedding = np.mean(embeddings, axis=0).astype(np.float32)
         stored = self.db.get_all_embeddings()
         for embedding in embeddings:
             duplicate = self.palm_processor.compute_similarity(embedding, stored, DUPLICATE_THRESHOLD)
             if duplicate["status"] == "ALLOWED":
                 raise RuntimeError(f"This palm is already registered as '{duplicate['name']}'")
-        user_id = self.db.add_user(
-            self.registration_session.name,
-            avg_embedding,
-            individual_embeddings=embeddings,
-            embedding_hands=embedding_hands,
-        )
+
+        try:
+            user_id = self.db.add_user(
+                self.registration_session.name,
+                avg_embedding,
+                nim=self.registration_session.nim,
+                individual_embeddings=embeddings,
+                embedding_hands=embedding_hands,
+            )
+        except ValueError as exc:
+            raise RuntimeError(str(exc))
+
+        nim = self.registration_session.nim
         name = self.registration_session.name
         self.registration_session = None
         self.worker_state = "running"
         return {
             "user_id": user_id,
+            "nim": nim,
             "name": name,
             "stored_embeddings": len(embeddings),
             "hands": {hand: embedding_hands.count(hand) for hand in REGISTRATION_HANDS},
@@ -311,7 +323,10 @@ class DeviceRuntime:
             return None
 
         self.scan_state = {"stage": "recognizing", "metrics": metrics}
-        embedding = self.palm_processor.get_embedding_from_notebook_frame(frame)
+        embedding = self.palm_processor.get_embedding_from_notebook_frame(
+            frame,
+            tta_enabled=RECOGNITION_TTA_ENABLED,
+        )
         if embedding is None:
             self.hand_seen_since_ms = None
             self.scan_state = {"stage": "preprocessing_failed", "metrics": metrics}

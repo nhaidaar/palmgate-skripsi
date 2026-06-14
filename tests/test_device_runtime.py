@@ -29,7 +29,7 @@ def test_runtime_recognizes_after_hold_threshold():
                 "steady": True,
             }
 
-        def get_embedding_from_notebook_frame(self, frame):
+        def get_embedding_from_notebook_frame(self, frame, tta_enabled=False):
             return np.ones(4, dtype=np.float32)
 
         def get_embedding(self, frame):
@@ -152,7 +152,7 @@ def test_runtime_tracks_scan_state_when_no_hand_detected():
         def get_registration_guidance_metrics(self, frame, previous_metrics=None):
             return {"hand_detected": False, "brightness": 80.0, "blur_score": 120.0}
 
-        def get_embedding_from_notebook_frame(self, frame):
+        def get_embedding_from_notebook_frame(self, frame, tta_enabled=False):
             raise AssertionError("No-hand frames must not be embedded")
 
     class FakeDB:
@@ -185,7 +185,7 @@ def test_runtime_tracks_scan_state_while_holding_detected_hand():
         def get_registration_guidance_metrics(self, frame, previous_metrics=None):
             return {"hand_detected": True, "hand_clipped": True}
 
-        def get_embedding_from_notebook_frame(self, frame):
+        def get_embedding_from_notebook_frame(self, frame, tta_enabled=False):
             return np.ones(4, dtype=np.float32)
 
     class FakeDB:
@@ -228,7 +228,7 @@ def test_runtime_does_not_embed_until_hold_window_completes():
         def get_registration_guidance_metrics(self, frame, previous_metrics=None):
             return {"hand_detected": True, "hand_clipped": False}
 
-        def get_embedding_from_notebook_frame(self, frame):
+        def get_embedding_from_notebook_frame(self, frame, tta_enabled=False):
             self.embedding_calls += 1
             return np.ones(4, dtype=np.float32)
 
@@ -298,7 +298,7 @@ def test_runtime_scans_again_after_cooldown_with_hand_still_present():
         def get_registration_guidance_metrics(self, frame, previous_metrics=None):
             return {"hand_detected": self.hand_detected, "hand_clipped": False}
 
-        def get_embedding_from_notebook_frame(self, frame):
+        def get_embedding_from_notebook_frame(self, frame, tta_enabled=False):
             self.embedding_calls += 1
             return np.ones(4, dtype=np.float32)
 
@@ -377,7 +377,7 @@ def test_runtime_starts_hold_for_detected_clipped_hand():
         def get_registration_guidance_metrics(self, frame, previous_metrics=None):
             return {"hand_detected": True, "hand_clipped": True}
 
-        def get_embedding_from_notebook_frame(self, frame):
+        def get_embedding_from_notebook_frame(self, frame, tta_enabled=False):
             return np.ones(4, dtype=np.float32)
 
     class FakeDB:
@@ -414,7 +414,7 @@ def test_runtime_does_not_recognize_without_detected_hand():
         def get_registration_guidance_metrics(self, frame, previous_metrics=None):
             return {"hand_detected": False, "hand_clipped": True}
 
-        def get_embedding_from_notebook_frame(self, frame):
+        def get_embedding_from_notebook_frame(self, frame, tta_enabled=False):
             raise AssertionError("background must not be embedded without a detected hand")
 
     class FakeDB:
@@ -460,7 +460,7 @@ def test_start_registration_pauses_recognition():
                 "steady": False,
             }
 
-        def get_embedding_from_notebook_frame(self, frame):
+        def get_embedding_from_notebook_frame(self, frame, tta_enabled=False):
             raise AssertionError("recognition should be paused during registration")
 
     class FakeDB:
@@ -469,7 +469,7 @@ def test_start_registration_pauses_recognition():
 
     runtime = DeviceRuntime(FakeCamera(), FakeProcessor(), FakeDB(), clock=FakeClock())
 
-    runtime.start_registration("Alice")
+    runtime.start_registration("12345", "Alice")
     result = runtime.tick()
 
     assert result is None
@@ -482,7 +482,7 @@ def test_cancel_registration_returns_to_running_state():
 
     runtime = DeviceRuntime(camera=None, palm_processor=None, db=None)
 
-    runtime.start_registration("Alice")
+    runtime.start_registration("12345", "Alice")
     runtime.cancel_registration()
 
     assert runtime.registration_session is None
@@ -510,11 +510,11 @@ def test_capture_registration_sample_uses_guidance_score():
             return np.zeros((240, 320, 3), dtype=np.uint8)
 
     class FakeProcessor:
-        def get_embedding_from_notebook_frame(self, frame):
+        def get_embedding_from_notebook_frame(self, frame, tta_enabled=False):
             return np.ones(4, dtype=np.float32)
 
     runtime = DeviceRuntime(camera=FakeCamera(), palm_processor=FakeProcessor(), db=None)
-    runtime.start_registration("Alice")
+    runtime.start_registration("12345", "Alice")
     runtime.registration_session.last_guidance = {"acceptable": True, "score": 0.85}
 
     sample = runtime.capture_registration_sample()
@@ -533,11 +533,11 @@ def test_capture_registration_sample_tags_first_five_left_next_five_right():
             return np.zeros((240, 320, 3), dtype=np.uint8)
 
     class FakeProcessor:
-        def get_embedding_from_notebook_frame(self, frame):
+        def get_embedding_from_notebook_frame(self, frame, tta_enabled=False):
             return np.ones(4, dtype=np.float32)
 
     runtime = DeviceRuntime(camera=FakeCamera(), palm_processor=FakeProcessor(), db=None)
-    runtime.start_registration("Alice")
+    runtime.start_registration("12345", "Alice")
     runtime.registration_session.last_guidance = {"acceptable": True, "score": 1.0}
 
     samples = [runtime.capture_registration_sample() for _ in range(10)]
@@ -545,7 +545,7 @@ def test_capture_registration_sample_tags_first_five_left_next_five_right():
     assert [sample["hand"] for sample in samples] == ["left"] * 5 + ["right"] * 5
 
 
-def test_finalize_registration_stores_five_embeddings_per_hand():
+def test_finalize_registration_stores_one_template_per_hand():
     from app.device_runtime import DeviceRuntime
 
     class FakeProcessor:
@@ -559,18 +559,18 @@ def test_finalize_registration_stores_five_embeddings_per_hand():
         def get_all_embeddings(self):
             return []
 
-        def add_user(self, name, embedding, individual_embeddings=None, embedding_hands=None):
-            self.added = (name, embedding, individual_embeddings, embedding_hands)
+        def add_user(self, name, embedding, *, nim, individual_embeddings=None, embedding_hands=None):
+            self.added = (nim, name, embedding, individual_embeddings, embedding_hands)
             return 123
 
     runtime = DeviceRuntime(camera=None, palm_processor=FakeProcessor(), db=FakeDB())
-    runtime.start_registration("Alice")
+    runtime.start_registration("12345", "Alice")
     runtime.registration_session.captured_samples = [
         {
             "sample_index": i,
             "hand": "left" if i < 5 else "right",
             "quality_score": 1.0,
-            "embedding": np.ones(4, dtype=np.float32),
+            "embedding": np.array([1.0, 0.0], dtype=np.float32) if i < 5 else np.array([0.0, 1.0], dtype=np.float32),
         }
         for i in range(10)
     ]
@@ -578,11 +578,13 @@ def test_finalize_registration_stores_five_embeddings_per_hand():
     result = runtime.finalize_registration()
 
     assert result["user_id"] == 123
-    assert result["stored_embeddings"] == 10
-    assert result["hands"] == {"left": 5, "right": 5}
-    assert runtime.db.added[0] == "Alice"
-    assert len(runtime.db.added[2]) == 10
-    assert runtime.db.added[3] == ["left"] * 5 + ["right"] * 5
+    assert result["stored_embeddings"] == 2
+    assert result["nim"] == "12345"
+    assert result["hands"] == {"left": 1, "right": 1}
+    assert runtime.db.added[0] == "12345"
+    assert runtime.db.added[1] == "Alice"
+    assert len(runtime.db.added[3]) == 2
+    assert runtime.db.added[4] == ["left", "right"]
     assert runtime.registration_session is None
     assert runtime.worker_state == "running"
 
@@ -602,7 +604,7 @@ def test_finalize_registration_requires_five_valid_samples_per_hand():
             raise AssertionError("Incomplete registration should not be stored")
 
     runtime = DeviceRuntime(camera=None, palm_processor=FakeProcessor(), db=FakeDB())
-    runtime.start_registration("Alice")
+    runtime.start_registration("12345", "Alice")
     runtime.registration_session.captured_samples = [
         {
             "sample_index": i,
@@ -636,7 +638,7 @@ def test_finalize_registration_rejects_duplicate_palm():
             raise AssertionError("Duplicate should not be stored")
 
     runtime = DeviceRuntime(camera=None, palm_processor=FakeProcessor(), db=FakeDB())
-    runtime.start_registration("Alice")
+    runtime.start_registration("12345", "Alice")
     runtime.registration_session.captured_samples = [
         {
             "sample_index": i,
@@ -659,7 +661,7 @@ def test_capture_requires_acceptable_guidance():
     from app.device_runtime import DeviceRuntime
 
     runtime = DeviceRuntime(camera=None, palm_processor=None, db=None)
-    runtime.start_registration("Alice")
+    runtime.start_registration("12345", "Alice")
     runtime.registration_session.last_guidance = {"acceptable": False, "failures": ["size"]}
 
     try:
@@ -674,7 +676,7 @@ def test_capture_registration_sample_stops_after_ten_samples():
     from app.device_runtime import DeviceRuntime
 
     runtime = DeviceRuntime(camera=None, palm_processor=None, db=None)
-    runtime.start_registration("Alice")
+    runtime.start_registration("12345", "Alice")
     runtime.registration_session.current_sample_index = 10
     runtime.registration_session.last_guidance = {"acceptable": True, "score": 1.0}
 
@@ -711,7 +713,7 @@ def test_registration_tick_reuses_five_guidance_targets_per_hand():
             pass
 
     runtime = DeviceRuntime(FakeCamera(), palm_processor=FakeProcessor(), db=FakeDB())
-    runtime.start_registration("Alice")
+    runtime.start_registration("12345", "Alice")
     runtime.registration_session.current_sample_index = 5
 
     runtime.tick()
@@ -744,7 +746,7 @@ def test_registration_tick_after_final_sample_keeps_last_target():
             pass
 
     runtime = DeviceRuntime(FakeCamera(), palm_processor=FakeProcessor(), db=FakeDB())
-    runtime.start_registration("Alice")
+    runtime.start_registration("12345", "Alice")
     runtime.registration_session.current_sample_index = 10
 
     runtime.tick()
@@ -782,7 +784,7 @@ def test_registration_tick_updates_real_guidance_from_processor():
 
     processor = FakeProcessor()
     runtime = DeviceRuntime(FakeCamera(), palm_processor=processor, db=FakeDB())
-    runtime.start_registration("Alice")
+    runtime.start_registration("12345", "Alice")
 
     runtime.tick()
 

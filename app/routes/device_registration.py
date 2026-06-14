@@ -11,11 +11,13 @@ router = APIRouter(prefix="/api/device-registration")
 
 
 class StartRegistrationRequest(BaseModel):
+    nim: str = ""
     name: str
 
 
 class StartRegistrationResponse(BaseModel):
     session_id: str
+    nim: str
     name: str
     current_sample_index: int
     captured_count: int
@@ -56,14 +58,17 @@ def _registration_progress(session) -> dict:
 
 @router.post("/start", response_model=StartRegistrationResponse)
 async def start_registration(req: StartRegistrationRequest):
+    if not req.nim.strip():
+        raise HTTPException(status_code=400, detail="NIM is required")
     if not req.name.strip():
         raise HTTPException(status_code=400, detail="Name is required")
     try:
-        session = _runtime().start_registration(req.name)
+        session = _runtime().start_registration(req.nim, req.name)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return StartRegistrationResponse(
         session_id=session.id,
+        nim=session.nim,
         name=session.name,
         current_sample_index=session.current_sample_index,
         captured_count=len(session.captured_samples),
@@ -81,6 +86,7 @@ async def registration_status():
         "active": True,
         "worker_state": runtime.worker_state,
         "session_id": session.id,
+        "nim": session.nim,
         "name": session.name,
         "current_sample_index": session.current_sample_index,
         "captured_count": len(session.captured_samples),
