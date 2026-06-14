@@ -17,6 +17,7 @@ class Database:
         self.conn.executescript("""
             CREATE TABLE IF NOT EXISTS users (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                nim         TEXT NOT NULL UNIQUE,
                 name        TEXT NOT NULL,
                 embedding   BLOB NOT NULL,
                 created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -55,9 +56,19 @@ class Database:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
+        self._ensure_user_nim_column()
         self._ensure_user_embedding_metadata_columns()
         self._ensure_access_log_metadata_columns()
         self.conn.commit()
+
+    def _ensure_user_nim_column(self):
+        columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(users)")}
+        if "nim" not in columns:
+            self.conn.execute("ALTER TABLE users ADD COLUMN nim TEXT")
+            self.conn.execute(
+                "UPDATE users SET nim = 'legacy-' || id WHERE nim IS NULL OR TRIM(nim) = ''"
+            )
+        self.conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_nim ON users(nim)")
 
     def _ensure_user_embedding_metadata_columns(self):
         columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(user_embeddings)")}
@@ -75,13 +86,28 @@ class Database:
         self,
         name: str,
         embedding: np.ndarray,
+        *,
+        nim: str,
         individual_embeddings: "list[np.ndarray] | None" = None,
         embedding_hands: "list[str] | None" = None,
     ) -> int:
-        cursor = self.conn.execute(
-            "INSERT INTO users (name, embedding) VALUES (?, ?)",
-            (name, embedding.tobytes()),
-        )
+        clean_nim = nim.strip()
+        clean_name = name.strip()
+        if not clean_nim:
+            raise ValueError("NIM is required")
+        if not clean_name:
+            raise ValueError("Name is required")
+
+        try:
+            cursor = self.conn.execute(
+                "INSERT INTO users (nim, name, embedding) VALUES (?, ?, ?)",
+                (clean_nim, clean_name, embedding.astype(np.float32).tobytes()),
+            )
+        except sqlite3.IntegrityError as exc:
+            if "users.nim" in str(exc) or "idx_users_nim" in str(exc) or "UNIQUE" in str(exc):
+                raise ValueError("NIM already exists") from exc
+            raise
+
         user_id = cursor.lastrowid
         if individual_embeddings:
             hands = embedding_hands or ["unknown"] * len(individual_embeddings)
@@ -89,14 +115,14 @@ class Database:
                 raise ValueError("embedding_hands must match individual_embeddings length")
             self.conn.executemany(
                 "INSERT INTO user_embeddings (user_id, embedding, hand) VALUES (?, ?, ?)",
-                [(user_id, e.tobytes(), hand) for e, hand in zip(individual_embeddings, hands)],
+                [(user_id, e.astype(np.float32).tobytes(), hand) for e, hand in zip(individual_embeddings, hands)],
             )
         self.conn.commit()
         return user_id
 
     def get_all_users(self) -> list:
         rows = self.conn.execute(
-            "SELECT id, name, created_at FROM users ORDER BY id"
+            "SELECT id, nim, name, created_at FROM users ORDER BY id"
         ).fetchall()
         return [dict(r) for r in rows]
 

@@ -16,17 +16,17 @@ def db():
 
 
 def test_add_user(db):
-    embedding = np.random.rand(1280).astype(np.float32)
-    user_id = db.add_user("TestUser", embedding)
+    embedding = np.random.rand(128).astype(np.float32)
+    user_id = db.add_user("TestUser", embedding, nim="000")
     assert user_id is not None
     assert user_id > 0
 
 
 def test_get_all_users(db):
-    emb1 = np.random.rand(1280).astype(np.float32)
-    emb2 = np.random.rand(1280).astype(np.float32)
-    db.add_user("Alice", emb1)
-    db.add_user("Bob", emb2)
+    emb1 = np.random.rand(128).astype(np.float32)
+    emb2 = np.random.rand(128).astype(np.float32)
+    db.add_user("Alice", emb1, nim="001")
+    db.add_user("Bob", emb2, nim="002")
     users = db.get_all_users()
     assert len(users) == 2
     assert users[0]["name"] == "Alice"
@@ -34,8 +34,8 @@ def test_get_all_users(db):
 
 
 def test_get_all_embeddings(db):
-    emb = np.random.rand(1280).astype(np.float32)
-    db.add_user("Alice", emb)
+    emb = np.random.rand(128).astype(np.float32)
+    db.add_user("Alice", emb, nim="001")
     embeddings = db.get_all_embeddings()
     assert len(embeddings) == 1
     assert embeddings[0]["name"] == "Alice"
@@ -49,6 +49,7 @@ def test_add_user_stores_embedding_hand_labels(db):
     db.add_user(
         "Alice",
         emb1,
+        nim="001",
         individual_embeddings=[emb1, emb2],
         embedding_hands=["left", "right"],
     )
@@ -61,15 +62,49 @@ def test_add_user_stores_embedding_hand_labels(db):
 
 def test_get_all_embeddings_returns_unknown_hand_for_legacy_user(db):
     emb = np.ones(4, dtype=np.float32)
-    db.add_user("Legacy", emb)
+    db.add_user("Legacy", emb, nim="999")
 
     embeddings = db.get_all_embeddings()
     assert embeddings[0]["hand"] == "unknown"
 
 
+def test_add_user_requires_nim(db):
+    emb = np.ones(128, dtype=np.float32)
+
+    try:
+        db.add_user("Alice", emb, nim=" ")
+    except ValueError as exc:
+        assert "NIM is required" in str(exc)
+    else:
+        raise AssertionError("Expected missing NIM to be rejected")
+
+
+def test_get_all_users_includes_nim(db):
+    emb = np.ones(128, dtype=np.float32)
+
+    db.add_user("Alice", emb, nim="12345")
+
+    users = db.get_all_users()
+    assert users[0]["nim"] == "12345"
+    assert users[0]["name"] == "Alice"
+
+
+def test_duplicate_nim_is_rejected(db):
+    emb = np.ones(128, dtype=np.float32)
+
+    db.add_user("Alice", emb, nim="12345")
+
+    try:
+        db.add_user("Bob", emb, nim="12345")
+    except ValueError as exc:
+        assert "NIM already exists" in str(exc)
+    else:
+        raise AssertionError("Expected duplicate NIM to be rejected")
+
+
 def test_delete_user(db):
-    emb = np.random.rand(1280).astype(np.float32)
-    user_id = db.add_user("ToDelete", emb)
+    emb = np.random.rand(128).astype(np.float32)
+    user_id = db.add_user("ToDelete", emb, nim="003")
     assert db.delete_user(user_id) is True
     assert len(db.get_all_users()) == 0
 
@@ -92,8 +127,8 @@ def test_add_access_log(db):
 
 
 def test_delete_user_preserves_access_logs(db):
-    emb = np.random.rand(1280).astype(np.float32)
-    user_id = db.add_user("LoggedUser", emb)
+    emb = np.random.rand(128).astype(np.float32)
+    user_id = db.add_user("LoggedUser", emb, nim="004")
     db.add_access_log(user_id=user_id, matched_name="LoggedUser", status="ALLOWED", similarity=0.9)
 
     assert db.delete_user(user_id) is True
