@@ -12,7 +12,8 @@ class FakeDB:
     def get_all_embeddings(self):
         return []
 
-    def add_user(self, name, embedding, individual_embeddings=None, embedding_hands=None):
+    def add_user(self, name, embedding, *, nim, individual_embeddings=None, embedding_hands=None):
+        self.nim = nim
         self.name = name
         self.embedding = embedding
         self.individual_embeddings = individual_embeddings
@@ -26,12 +27,12 @@ class FakeProcessor:
         self.duplicate = duplicate
         self.similarity_checks = 0
 
-    def get_embedding_from_roi(self, frame, rotation_angle):
+    def get_embedding_from_roi(self, frame, rotation_angle=0.0, tta_enabled=False):
         self.next_value += 1
         return np.full(4, self.next_value, dtype=np.float32)
 
-    def get_embedding(self, frame):
-        return self.get_embedding_from_roi(frame, 0.0)
+    def get_embedding(self, frame, tta_enabled=False):
+        return self.get_embedding_from_roi(frame, 0.0, tta_enabled=tta_enabled)
 
     def compute_similarity(self, embedding, stored, threshold):
         self.similarity_checks += 1
@@ -43,7 +44,7 @@ class FakeProcessor:
 def test_register_rejects_fewer_than_ten_images():
     client = TestClient(app)
 
-    response = client.post("/api/register", json={"name": "Alice", "images": ["img"] * 9})
+    response = client.post("/api/register", json={"nim": "12345", "name": "Alice", "images": ["img"] * 9})
 
     assert response.status_code == 400
     assert "5 left" in response.json()["detail"]
@@ -53,7 +54,7 @@ def test_register_rejects_fewer_than_ten_images():
 def test_register_rejects_missing_hand_labels():
     client = TestClient(app)
 
-    response = client.post("/api/register", json={"name": "Alice", "images": ["img"] * 10})
+    response = client.post("/api/register", json={"nim": "12345", "name": "Alice", "images": ["img"] * 10})
 
     assert response.status_code == 400
     assert "5 left" in response.json()["detail"]
@@ -65,7 +66,7 @@ def test_register_rejects_unbalanced_hand_labels():
 
     response = client.post(
         "/api/register",
-        json={"name": "Alice", "images": ["img"] * 10, "hands": ["left"] * 10},
+        json={"nim": "12345", "name": "Alice", "images": ["img"] * 10, "hands": ["left"] * 10},
     )
 
     assert response.status_code == 400
@@ -73,7 +74,7 @@ def test_register_rejects_unbalanced_hand_labels():
     assert "5 right" in response.json()["detail"]
 
 
-def test_register_saves_ten_embeddings_with_hand_labels(monkeypatch):
+def test_register_saves_two_hand_templates_with_nim(monkeypatch):
     import app.main as main
     import app.routes.register as register_route
 
@@ -87,13 +88,14 @@ def test_register_saves_ten_embeddings_with_hand_labels(monkeypatch):
     hands = ["left"] * 5 + ["right"] * 5
     response = client.post(
         "/api/register",
-        json={"name": "Alice", "images": ["img"] * 10, "hands": hands, "is_roi": True},
+        json={"nim": "12345", "name": "Alice", "images": ["img"] * 10, "hands": hands, "is_roi": True},
     )
 
     assert response.status_code == 200
-    assert len(fake_db.individual_embeddings) == 10
-    assert fake_db.embedding_hands == hands
-    assert fake_processor.similarity_checks == 10
+    assert fake_db.nim == "12345"
+    assert len(fake_db.individual_embeddings) == 2
+    assert fake_db.embedding_hands == ["left", "right"]
+    assert fake_processor.similarity_checks == 2
 
 
 def test_register_rejects_duplicate_candidate_embedding(monkeypatch):
@@ -108,6 +110,7 @@ def test_register_rejects_duplicate_candidate_embedding(monkeypatch):
     response = client.post(
         "/api/register",
         json={
+            "nim": "12345",
             "name": "Alice",
             "images": ["img"] * 10,
             "hands": ["left"] * 5 + ["right"] * 5,
@@ -117,3 +120,43 @@ def test_register_rejects_duplicate_candidate_embedding(monkeypatch):
 
     assert response.status_code == 409
     assert "already registered" in response.json()["detail"]
+
+
+def test_register_rejects_missing_nim():
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/register",
+        json={"name": "Alice", "images": ["img"] * 10, "hands": ["left"] * 5 + ["right"] * 5},
+    )
+
+    assert response.status_code == 400
+    assert "NIM is required" in response.json()["detail"]
+
+
+def test_register_rejects_duplicate_nim(monkeypatch):
+    import app.main as main
+    import app.routes.register as register_route
+
+    class DuplicateNimDB(FakeDB):
+        def add_user(self, name, embedding, *, nim, individual_embeddings=None, embedding_hands=None):
+            raise ValueError("NIM already exists")
+
+    monkeypatch.setattr(main, "db", DuplicateNimDB())
+    monkeypatch.setattr(main, "palm_processor", FakeProcessor())
+    monkeypatch.setattr(register_route, "decode_base64_image", lambda image: np.zeros((2, 2, 3), dtype=np.uint8))
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/register",
+        json={
+            "nim": "12345",
+            "name": "Alice",
+            "images": ["img"] * 10,
+            "hands": ["left"] * 5 + ["right"] * 5,
+            "is_roi": True,
+        },
+    )
+
+    assert response.status_code == 409
+    assert "NIM already exists" in response.json()["detail"]
