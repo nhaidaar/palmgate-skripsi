@@ -80,3 +80,28 @@ def test_browser_registration_sends_hand_labels():
     assert "leftCount === REGISTRATION_CAPTURES_PER_HAND" in source
     assert "rightCount === REGISTRATION_CAPTURES_PER_HAND" in source
     assert "getCurrentRegistrationHand()" in source
+
+
+def test_registration_ui_requires_and_sends_nim():
+    html = Path("app/static/index.html").read_text()
+    source = Path("app/static/app.js").read_text()
+
+    assert "id=\"userNim\"" in html
+    assert "const userNim" in source
+    assert "nim: userNim.value.trim()" in source
+    assert "hasNim" in source
+
+
+def test_browser_roi_is_not_rotated_twice():
+    source = Path("app/static/app.js").read_text()
+    roi_block = source[source.index("function extractClientROI") : source.index("Ring progress")]
+
+    assert "rotationAngle" not in roi_block
+    assert "return { data: roiCanvas.toDataURL('image/jpeg', 0.9) };" in roi_block
+
+
+def test_frontend_displays_nim_with_user_name():
+    source = Path("app/static/app.js").read_text()
+
+    assert "${esc(u.nim)}" in source
+    assert "${esc(u.name)}" in source

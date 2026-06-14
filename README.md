@@ -7,7 +7,8 @@ Web-based palmprint recognition app that now supports two operating modes:
 ## Requirements
 
 - Python 3.10+
-- `palm_recognition.tflite` in the project root
+- `palm_embedding.tflite` in the project root
+- `model_metadata.json` in the project root if available
 - `hand_landmarker.task` in the project root
 
 ## Setup
@@ -37,7 +38,7 @@ Open: [http://127.0.0.1:8000](http://127.0.0.1:8000)
 ## Current features
 
 - **Scan Palm** — browser-camera recognition with ALLOWED / DENIED result
-- **Register** — USB-camera registration that captures 7 guided samples and stores the best 5
+- **Register** — USB-camera registration that captures 5 left-hand and 5 right-hand samples and stores per-hand templates
 - **Access Log** — timestamped history of recognition attempts
 - **Device Status** — shows worker state, camera state, FPS, registration state, and last recognition
 - **USB Runtime** — optional always-on worker for Orange Pi with a USB camera
@@ -94,16 +95,14 @@ Example response:
 
 ## Official USB registration workflow
 
-Production registration uses the Orange Pi USB camera, not the browser camera. The app captures 7 guided samples and stores the best 5 embeddings.
+Production registration uses the Orange Pi USB camera, not the browser camera. The app captures 5 left-hand and 5 right-hand samples and stores one template per hand.
 
-Sample sequence:
+Sample sequence for each hand:
 1. Center palm
 2. Move closer
 3. Move farther
 4. Rotate left
 5. Rotate right
-6. Shift left
-7. Shift right
 
 Browser registration is kept only for local testing and may be less reliable on the USB device.
 
@@ -115,7 +114,7 @@ You can bootstrap temporary users from named full-hand images in `seeds/`:
 python scripts/seed_users.py seeds
 ```
 
-Each image filename becomes the user name. The script uses the notebook-style preprocessing path, creates 7 mild palm ROI variants, averages the best 5 embeddings, and stores one averaged embedding per user. Existing users are skipped by default and access logs are preserved. To replace registered users while keeping logs:
+Each image or folder label must use `nim_name` format, for example `12345_Naufal.jpg`. The script uses the same MediaPipe embedding path as runtime and stores a template for test seeding. Existing users are skipped by default and access logs are preserved. To replace registered users while keeping logs:
 
 ```bash
 python scripts/seed_users.py seeds --replace-users
@@ -200,16 +199,15 @@ journalctl -u palmgate-device -f
 
 ## How recognition works
 
-1. Full-hand frames use notebook-style preprocessing: background removal, mask thresholding, contour extraction, FFT valley detection, palm ROI crop, CLAHE, and resize to `224×224`
-2. `palm_recognition.tflite` generates an embedding
-3. Cosine similarity compares the query embedding against stored per-capture embeddings
-4. Result is recorded as `ALLOWED` or `DENIED`
-
-MediaPipe is used for live registration guidance only; official USB registration and recognition embeddings use the notebook-style preprocessing path.
+1. Frames use MediaPipe hand landmarks to crop the palm ROI.
+2. The ROI is converted to grayscale, enhanced with CLAHE, converted back to RGB, resized to `224×224`, and kept as `0–255` float32 input.
+3. `palm_embedding.tflite` outputs a 128-d L2-normalized embedding directly.
+4. Cosine similarity compares the query embedding against stored per-hand templates.
+5. Result is recorded as `ALLOWED` or `DENIED`.
 
 ## Cross-device / cross-brightness reliability
 
-USB registration captures 7 guided samples and stores the best 5 individual capture embeddings. At recognition time the query is compared against every stored capture and the highest single match wins. Combined with brightness normalization, this improves accuracy when enrollment and recognition cameras differ.
+USB registration captures 5 samples per hand, averages each hand into a normalized template, and compares recognition queries against those templates. Combined with brightness normalization, this improves accuracy when enrollment and recognition cameras differ.
 
 ## Database migration notice
 

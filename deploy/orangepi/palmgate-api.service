@@ -5,6 +5,8 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/palmgate
+Environment=MODEL_PATH=/opt/palmgate/palm_embedding.tflite
+Environment=MODEL_METADATA_PATH=/opt/palmgate/model_metadata.json
 ExecStart=/opt/palmgate/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=3

@@ -8,6 +8,8 @@ WorkingDirectory=/opt/palmgate
 Environment=DEVICE_RUNTIME_ENABLED=1
 Environment=CAMERA_SOURCE=usb
 Environment=CAMERA_DEVICE_INDEX=0
+Environment=MODEL_PATH=/opt/palmgate/palm_embedding.tflite
+Environment=MODEL_METADATA_PATH=/opt/palmgate/model_metadata.json
 ExecStart=/opt/palmgate/.venv/bin/python -m app.device_runtime
 Restart=always
 RestartSec=3

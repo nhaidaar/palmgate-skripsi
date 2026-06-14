@@ -65,6 +65,7 @@ const btnScan          = $('btnScan');
 const btnMode          = $('btnMode');
 const btnRefresh       = $('btnRefresh');
 const userName         = $('userName');
+const userNim          = $('userNim');
 const usbRegistrationPreview = $('usbRegistrationPreview');
 // Unified registration buttons
 const btnStartRegistration = $('btnStartRegistration');
@@ -264,7 +265,7 @@ function updateBrightnessBadge(videoEl, landmarks, badgeId) {
 // (index-MCP → pinky-MCP) is rotated to horizontal before cropping so the
 // crop matches the training data distribution.
 //
-// Returns { data: base64string, rotationAngle: degrees }
+// Returns { data: base64string }; ROI is already aligned.
 function extractClientROI(videoEl, landmarks) {
   const w = videoEl.videoWidth  || 640;
   const h = videoEl.videoHeight || 480;
@@ -277,12 +278,12 @@ function extractClientROI(videoEl, landmarks) {
   // Knuckle-line rotation angle (same logic as calculate_roi in the notebook)
   const dx = (pinkyMcp.x - indexMcp.x) * w;
   const dy = (pinkyMcp.y - indexMcp.y) * h;
-  const rotationAngle = Math.atan2(dy, dx) * (180 / Math.PI);
+  const angleDeg = Math.atan2(dy, dx) * (180 / Math.PI);
 
   // Rotate the video frame to align the knuckle line to horizontal
   const knuckleCx = (indexMcp.x + pinkyMcp.x) / 2 * w;
   const knuckleCy = (indexMcp.y + pinkyMcp.y) / 2 * h;
-  const rad = rotationAngle * (Math.PI / 180);
+  const rad = angleDeg * (Math.PI / 180);
   const cosA = Math.cos(rad);
   const sinA = Math.sin(rad);
 
@@ -326,7 +327,7 @@ function extractClientROI(videoEl, landmarks) {
   roiCanvas.height = cropH;
   roiCanvas.getContext('2d').drawImage(rotCanvas, x1, y1, cropW, cropH, 0, 0, cropW, cropH);
 
-  return { data: roiCanvas.toDataURL('image/jpeg', 0.9), rotationAngle };
+  return { data: roiCanvas.toDataURL('image/jpeg', 0.9) };
 }
 
 // ── Ring progress ────────────────────────────────────────────────
@@ -528,11 +529,10 @@ async function triggerScan() {
   showScanning();
 
   // Use client-side ROI extraction if landmarks available (matches registration pipeline)
-  let b64, isRoi = false, rotationAngle = 0;
+  let b64, isRoi = false;
   if (state.lastLandmarks && state.lastLandmarks.length > 0) {
     const roi = extractClientROI(video, state.lastLandmarks[0]);
     b64 = roi.data;
-    rotationAngle = roi.rotationAngle;
     isRoi = true;
   } else {
     b64 = captureFrame(video);
@@ -544,7 +544,7 @@ async function triggerScan() {
     const res = await fetch('/api/recognize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: b64, is_roi: isRoi, rotation_angle: rotationAngle }),
+      body: JSON.stringify({ image: b64, is_roi: isRoi }),
     });
     const elapsed = Math.round(performance.now() - scanStart);
 
@@ -671,11 +671,13 @@ function getCurrentSamplePrompt() {
 }
 
 btnStartRegistration?.addEventListener('click', async () => {
+  const nim = userNim.value.trim();
   const name = userName.value.trim();
+  if (!nim) return setFeedback('NIM is required', 'error');
   if (!name) return setFeedback('Name is required', 'error');
 
   if (state.usbDeviceMode) {
-    const result = await apiStartRegistration(name);
+    const result = await apiStartRegistration(nim, name);
     if (result.detail) return setFeedback(result.detail, 'error');
   }
 
@@ -724,11 +726,11 @@ btnCancelRegistration?.addEventListener('click', async () => {
 });
 
 // API calls for USB mode
-async function apiStartRegistration(name) {
+async function apiStartRegistration(nim, name) {
   const res = await fetch('/api/device-registration/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ nim: userNim.value.trim(), name }),
   });
   return await res.json();
 }
@@ -857,17 +859,16 @@ function captureBrowserSample() {
   }
 
   const hand = getCurrentRegistrationHand();
-  let b64, rotationAngle = 0;
+  let b64;
   if (state.lastLandmarks && state.lastLandmarks.length > 0) {
     const roi = extractClientROI(videoReg, state.lastLandmarks[0]);
     b64 = roi.data;
-    rotationAngle = roi.rotationAngle;
   } else {
     b64 = captureFrame(videoReg);
   }
 
   triggerFlash('captureFlashReg');
-  state.capturedSamples.push({ data: b64, rotationAngle, hand });
+  state.capturedSamples.push({ data: b64, hand });
   state.currentSampleIndex = state.capturedSamples.length;
   const counts = getRegistrationCounts();
   state.registrationCounts = counts;
@@ -876,23 +877,23 @@ function captureBrowserSample() {
 }
 
 async function finalizeBrowserRegistration() {
+  const nim = userNim.value.trim();
   const name = userName.value.trim();
   const { left: leftCount, right: rightCount } = getRegistrationCounts();
-  if (!name || !(leftCount === REGISTRATION_CAPTURES_PER_HAND && rightCount === REGISTRATION_CAPTURES_PER_HAND)) return;
+  if (!nim || !name || !(leftCount === REGISTRATION_CAPTURES_PER_HAND && rightCount === REGISTRATION_CAPTURES_PER_HAND)) return;
 
   setFeedback('Registering…', '');
-  const avgRotation = state.capturedSamples.reduce((s, c) => s + (c.rotationAngle || 0), 0) / state.capturedSamples.length;
 
   try {
     const res = await fetch('/api/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        nim,
         name,
         images: state.capturedSamples.map((c) => c.data),
         hands: state.capturedSamples.map((c) => c.hand),
         is_roi: true,
-        rotation_angle: avgRotation,
       }),
     });
     const data = await res.json();
@@ -930,8 +931,9 @@ function updateRegistrationUI() {
   renderQualityList(state.lastGuidance);
 
   const active = state.registrationActive;
+  const hasNim = userNim?.value?.trim()?.length > 0;
   const hasName = userName?.value?.trim()?.length > 0;
-  if (btnStartRegistration) btnStartRegistration.disabled = active || !hasName;
+  if (btnStartRegistration) btnStartRegistration.disabled = active || !hasNim || !hasName;
   if (btnCaptureSample) btnCaptureSample.disabled = !active || !(state.lastGuidance?.acceptable);
   if (btnFinalizeRegistration) btnFinalizeRegistration.disabled = !active || !isRegistrationComplete();
   if (btnCancelRegistration) btnCancelRegistration.disabled = !active;
@@ -942,7 +944,7 @@ function renderQualityList(guidance) {
   if (!list) return;
 
   if (!state.registrationActive) {
-    list.innerHTML = '<li><span>Status</span><strong class="neutral">Enter name to start</strong></li>';
+    list.innerHTML = '<li><span>Status</span><strong class="neutral">Enter NIM and name to start</strong></li>';
     return;
   }
   if (!guidance) {
@@ -983,6 +985,7 @@ function resetRegistration() {
   state.currentSampleIndex = 0;
   state.lastGuidance = null;
   stopRegistrationStatusPolling();
+  userNim.value = '';
   userName.value = '';
   updateRegistrationUI();
   updateHandGuideOverlay(null);
@@ -1093,10 +1096,14 @@ function updateHandGuideOverlay(metrics) {
   }
 }
 
-userName?.addEventListener('input', () => {
-  const hasName = userName.value.trim().length > 0;
-  if (btnStartRegistration) btnStartRegistration.disabled = state.registrationActive || !hasName;
-});
+function syncStartRegistrationDisabled() {
+  const hasNim = userNim?.value?.trim()?.length > 0;
+  const hasName = userName?.value?.trim()?.length > 0;
+  if (btnStartRegistration) btnStartRegistration.disabled = state.registrationActive || !hasNim || !hasName;
+}
+
+userNim?.addEventListener('input', syncStartRegistrationDisabled);
+userName?.addEventListener('input', syncStartRegistrationDisabled);
 
 // ── Access Log ───────────────────────────────────────────────────
 // ── Access Log Pagination ─────────────────────────────────────────
@@ -1184,7 +1191,7 @@ function renderUsers(users) {
         <circle cx="7" cy="4.5" r="2.5" stroke="currentColor" stroke-width="1.2"/>
         <path d="M2 13c0-2.761 2.239-4 5-4s5 1.239 5 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
       </svg>
-      <span class="user-chip-name">${esc(u.name)}</span>
+      <span class="user-chip-name">${esc(u.nim)} — ${esc(u.name)}</span>
       <button class="user-chip-delete" onclick="window.deleteUser(${u.id})" title="Remove">×</button>
     </div>`).join('');
 }

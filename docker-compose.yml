@@ -8,8 +8,9 @@ x-palmgate-common: &palmgate-common
 
   volumes:
     # ML model files — copy these to the Orange Pi once (they are gitignored):
-    #   scp palm_recognition.tflite hand_landmarker.task orangepi:/opt/palmgate/
-    - ./palm_recognition.tflite:/app/palm_recognition.tflite:ro
+    #   scp palm_embedding.tflite model_metadata.json hand_landmarker.task orangepi:/opt/palmgate/
+    - ./palm_embedding.tflite:/app/palm_embedding.tflite:ro
+    - ./model_metadata.json:/app/model_metadata.json:ro
     - ./hand_landmarker.task:/app/hand_landmarker.task:ro
     # Persistent storage for the SQLite database
     - palmgate-db:/data

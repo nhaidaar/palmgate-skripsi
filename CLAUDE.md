@@ -32,17 +32,15 @@ python scripts/seed_users.py seeds --replace-users  # replace existing
 
 ### Processing Pipeline
 
-Two preprocessing paths exist:
+The active runtime preprocessing path is **MediaPipe ROI** (`palm_processor.py:extract_palm_roi`): hand landmarks → palm ROI crop → grayscale → CLAHE → RGB → 224x224 resize. This must match `Palm Embedding.ipynb`.
 
-1. **MediaPipe path** (`palm_processor.py:extract_palm_roi`): Real-time hand detection using landmarks for browser-based scanning. Faster but less accurate.
+`notebook_preprocessing.py` contains the old rembg/FFT ROI path for reference only; it is not the active registration or recognition path.
 
-2. **Notebook path** (`notebook_preprocessing.py`): Background removal (rembg) → mask thresholding → contour extraction → FFT valley detection → palm ROI crop → CLAHE → 224x224 resize. Used for USB registration and all recognition embeddings.
-
-The TFLite model (`palm_recognition.tflite`) extracts 1280-dim embeddings from the GlobalAveragePooling2D layer. Recognition uses cosine similarity against stored embeddings with a 0.75 threshold.
+The TFLite model (`palm_embedding.tflite`) outputs a 128-dim L2-normalized embedding directly. Recognition uses cosine similarity against stored per-hand templates with the threshold from `model_metadata.json` or the default notebook operating threshold.
 
 ### Multi-Embedding Storage
 
-USB registration captures 7 guided samples, stores the best 5 individual embeddings per user. Recognition matches against every stored capture (not just the averaged embedding) for better cross-device accuracy.
+USB registration captures 5 samples per hand, stores one normalized template per hand, and recognition matches against the best hand template.
 
 ### Key Components
 
@@ -67,12 +65,12 @@ USB registration captures 7 guided samples, stores the best 5 individual embeddi
 ## Required Model Files
 
 Place in project root:
-- `palm_recognition.tflite` - EfficientNetB0 embedding model
+- `palm_embedding.tflite` - EfficientNetB0 128-d embedding model
 - `hand_landmarker.task` - MediaPipe hand detection model
 
 ## Database Migration
 
-Embeddings are incompatible across preprocessing pipeline changes. After upgrading, delete `palmprint.db` and re-register users.
+Embeddings are incompatible across preprocessing/model changes. After upgrading to `palm_embedding.tflite`, delete `palmprint.db` and re-register users.
 
 ## Orange Pi Deployment
 
