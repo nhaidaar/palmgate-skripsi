@@ -489,6 +489,29 @@ def test_cancel_registration_returns_to_running_state():
     assert runtime.worker_state == "running"
 
 
+def test_get_registration_status_returns_session_progress():
+    from app.device_runtime import DeviceRuntime
+
+    runtime = DeviceRuntime(camera=None, palm_processor=None, db=None)
+
+    assert runtime.get_registration_status() == {"active": False, "worker_state": "running"}
+
+    session = runtime.start_registration("12345", "Alice")
+    session.current_sample_index = 2
+    session.captured_samples = [{"hand": "left"}, {"hand": "left"}]
+    session.last_guidance = {"acceptable": True}
+
+    status = runtime.get_registration_status()
+
+    assert status["active"] is True
+    assert status["session_id"] == session.id
+    assert status["captured_count"] == 2
+    assert status["current_hand"] == "left"
+    assert status["left_count"] == 2
+    assert status["right_count"] == 0
+    assert status["guidance"] == {"acceptable": True}
+
+
 def test_capture_registration_sample_requires_active_session():
     from app.device_runtime import DeviceRuntime
 

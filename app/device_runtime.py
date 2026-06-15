@@ -134,6 +134,34 @@ class DeviceRuntime:
     def _target_index_for_sample_index(self, index: int) -> int:
         return index % REGISTRATION_CAPTURES_PER_HAND
 
+    def get_registration_status(self) -> dict:
+        with self._registration_lock:
+            session = self.registration_session
+            if session is None:
+                return {"active": False, "worker_state": self.worker_state}
+
+            counts = {hand: 0 for hand in REGISTRATION_HANDS}
+            for i, sample in enumerate(session.captured_samples):
+                hand = sample.get("hand", self._hand_for_sample_index(i))
+                if hand in counts:
+                    counts[hand] += 1
+
+            return {
+                "active": True,
+                "worker_state": self.worker_state,
+                "session_id": session.id,
+                "nim": session.nim,
+                "name": session.name,
+                "current_sample_index": session.current_sample_index,
+                "captured_count": len(session.captured_samples),
+                "guidance": session.last_guidance,
+                "required_per_hand": REGISTRATION_CAPTURES_PER_HAND,
+                "total_required": REGISTRATION_TOTAL_CAPTURES,
+                "current_hand": self._hand_for_sample_index(session.current_sample_index),
+                "left_count": counts.get("left", 0),
+                "right_count": counts.get("right", 0),
+            }
+
     def get_latest_frame_jpeg(self):
         frame = self._latest_frame_copy()
         if frame is None:

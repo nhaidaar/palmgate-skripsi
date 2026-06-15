@@ -65,22 +65,26 @@ def test_start_device_registration_returns_session(monkeypatch):
     assert data["right_count"] == 0
 
 
-def test_device_registration_status_returns_session(monkeypatch):
-    import threading
+def test_device_registration_status_uses_runtime_status_method(monkeypatch):
     import app.main as main
 
-    class FakeSession:
-        id = "session-1"
-        nim = "12345"
-        name = "Alice"
-        current_sample_index = 2
-        captured_samples = [{"hand": "left"}, {"hand": "left"}]
-        last_guidance = {"acceptable": True}
-
     class FakeRuntime:
-        worker_state = "registration_active"
-        registration_session = FakeSession()
-        _registration_lock = threading.Lock()
+        def get_registration_status(self):
+            return {
+                "active": True,
+                "worker_state": "registration_active",
+                "session_id": "session-1",
+                "nim": "12345",
+                "name": "Alice",
+                "current_sample_index": 2,
+                "captured_count": 2,
+                "guidance": {"acceptable": True},
+                "required_per_hand": 5,
+                "total_required": 10,
+                "current_hand": "left",
+                "left_count": 2,
+                "right_count": 0,
+            }
 
     monkeypatch.setattr(main, "device_runtime", FakeRuntime())
     client = TestClient(app)

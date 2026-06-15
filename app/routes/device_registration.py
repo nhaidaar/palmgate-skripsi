@@ -79,22 +79,7 @@ async def start_registration(req: StartRegistrationRequest):
 
 @router.get("/status")
 async def registration_status():
-    runtime = _runtime()
-    with runtime._registration_lock:
-        session = runtime.registration_session
-        if session is None:
-            return {"active": False, "worker_state": runtime.worker_state}
-        return {
-            "active": True,
-            "worker_state": runtime.worker_state,
-            "session_id": session.id,
-            "nim": session.nim,
-            "name": session.name,
-            "current_sample_index": session.current_sample_index,
-            "captured_count": len(session.captured_samples),
-            "guidance": session.last_guidance,
-            **_registration_progress(session),
-        }
+    return _runtime().get_registration_status()
 
 
 @router.get("/preview.jpg")
