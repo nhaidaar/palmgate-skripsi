@@ -164,13 +164,14 @@ def test_usb_preview_stream_endpoint_returns_mjpeg_response(monkeypatch):
 
 
 def test_mjpeg_frames_yields_latest_frame():
+    import asyncio
     from app.routes.device_registration import mjpeg_frames
 
     class FakeRuntime:
         def get_latest_frame_jpeg(self):
             return b"\xff\xd8jpeg-data"
 
-    chunk = next(mjpeg_frames(FakeRuntime()))
+    chunk = asyncio.run(anext(mjpeg_frames(FakeRuntime())))
 
     assert b"--frame" in chunk
     assert b"Content-Type: image/jpeg" in chunk
@@ -178,6 +179,7 @@ def test_mjpeg_frames_yields_latest_frame():
 
 
 def test_mjpeg_frames_uses_runtime_preview_interval(monkeypatch):
+    import asyncio
     import pytest
     from app.routes import device_registration
     from app.routes.device_registration import mjpeg_frames
@@ -190,18 +192,119 @@ def test_mjpeg_frames_uses_runtime_preview_interval(monkeypatch):
 
     sleeps = []
 
-    def fake_sleep(seconds):
+    async def fake_sleep(seconds):
         sleeps.append(seconds)
         raise RuntimeError("stop")
 
-    monkeypatch.setattr(device_registration.time, "sleep", fake_sleep)
-    frames = mjpeg_frames(FakeRuntime())
+    async def run_stream():
+        frames = mjpeg_frames(FakeRuntime())
+        await anext(frames)
+        await anext(frames)
 
-    next(frames)
+    monkeypatch.setattr(device_registration.asyncio, "sleep", fake_sleep)
     with pytest.raises(RuntimeError):
-        next(frames)
+        asyncio.run(run_stream())
 
     assert sleeps == [0.025]
+
+
+def test_scan_event_stream_formats_events():
+    import asyncio
+    import json
+    from app.routes.device_registration import scan_event_stream
+
+    class FakeSubscriber:
+        def get(self, block=True, timeout=None):
+            return {"stage": "recognized", "name": "Alice"}
+
+    class FakeBroadcaster:
+        def __init__(self):
+            self.unsubscribed = False
+
+        def subscribe(self):
+            return FakeSubscriber()
+
+        def unsubscribe(self, subscriber):
+            self.unsubscribed = True
+
+    class FakeRuntime:
+        scan_broadcaster = FakeBroadcaster()
+
+    async def first_event():
+        stream = scan_event_stream(FakeRuntime())
+        try:
+            return await anext(stream)
+        finally:
+            await stream.aclose()
+
+    chunk = asyncio.run(first_event())
+
+    assert chunk.startswith("data: ")
+    assert json.loads(chunk.removeprefix("data: ").strip()) == {"stage": "recognized", "name": "Alice"}
+
+
+def test_scan_event_stream_yields_keepalive_on_empty_queue():
+    import asyncio
+    import queue
+    from app.routes.device_registration import scan_event_stream
+
+    class FakeSubscriber:
+        def get(self, block=True, timeout=None):
+            raise queue.Empty
+
+    class FakeBroadcaster:
+        def subscribe(self):
+            return FakeSubscriber()
+
+        def unsubscribe(self, subscriber):
+            pass
+
+    class FakeRuntime:
+        scan_broadcaster = FakeBroadcaster()
+
+    async def first_event():
+        stream = scan_event_stream(FakeRuntime())
+        try:
+            return await anext(stream)
+        finally:
+            await stream.aclose()
+
+    assert asyncio.run(first_event()) == ": keepalive\n\n"
+
+
+def test_scan_event_stream_unsubscribes_on_close():
+    import asyncio
+    from app.routes.device_registration import scan_event_stream
+
+    class FakeSubscriber:
+        def get(self, block=True, timeout=None):
+            return {"stage": "recognized"}
+
+    class FakeBroadcaster:
+        def __init__(self):
+            self.subscriber = FakeSubscriber()
+            self.unsubscribed = False
+
+        def subscribe(self):
+            return self.subscriber
+
+        def unsubscribe(self, subscriber):
+            self.unsubscribed = subscriber is self.subscriber
+
+    class FakeRuntime:
+        def __init__(self):
+            self.scan_broadcaster = FakeBroadcaster()
+
+    runtime = FakeRuntime()
+
+    async def consume_and_close():
+        stream = scan_event_stream(runtime)
+        await anext(stream)
+        await stream.aclose()
+
+    asyncio.run(consume_and_close())
+
+    assert runtime.scan_broadcaster.unsubscribed is True
 
 
 def test_usb_preview_endpoint_returns_503_without_frame(monkeypatch):

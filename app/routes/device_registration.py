@@ -1,5 +1,6 @@
+import asyncio
 import json
-import time
+import queue
 
 from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import StreamingResponse
@@ -107,13 +108,13 @@ async def preview_frame():
     )
 
 
-def mjpeg_frames(runtime):
+async def mjpeg_frames(runtime):
     while True:
         frame = runtime.get_latest_frame_jpeg()
         if frame is not None:
             yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
         interval_seconds = getattr(runtime, "preview_frame_interval_ms", 100) / 1000
-        time.sleep(max(interval_seconds, 0.001))
+        await asyncio.sleep(max(interval_seconds, 0.001))
 
 
 @router.get("/preview.mjpg")
@@ -151,16 +152,16 @@ async def cancel_registration():
     return {"success": True}
 
 
-def scan_event_stream(runtime):
+async def scan_event_stream(runtime):
     """SSE generator that yields scan events as they occur."""
     subscriber = runtime.scan_broadcaster.subscribe()
     try:
         while True:
             try:
-                event = subscriber.get(timeout=30)
+                event = await asyncio.to_thread(subscriber.get, True, 30)
                 data = json.dumps(event)
                 yield f"data: {data}\n\n"
-            except Exception:
+            except queue.Empty:
                 yield ": keepalive\n\n"
     finally:
         runtime.scan_broadcaster.unsubscribe(subscriber)
