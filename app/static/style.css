@@ -23,6 +23,7 @@
   --text-1:         oklch(18% 0.02 255);
   --text-2:         oklch(45% 0.03 255);
   --text-3:         oklch(65% 0.02 255);
+  --text-muted:     var(--text-3);
 
   --border:         oklch(90% 0.012 255);
   --border-strong:  oklch(78% 0.02 255);

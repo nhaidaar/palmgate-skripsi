@@ -261,9 +261,8 @@ function updateBrightnessBadge(videoEl, landmarks, badgeId) {
 // computed by the browser's MediaPipe instance. Sends a small JPEG crop
 // instead of a full-resolution PNG, eliminating server-side detection.
 //
-// Also mirrors the notebook's calculate_roi rotation step: the knuckle line
-// (index-MCP → pinky-MCP) is rotated to horizontal before cropping so the
-// crop matches the training data distribution.
+// Mirrors server-side PalmProcessor.extract_palm_roi(): rotate around the
+// wrist/middle-MCP palm center, then crop from the aligned palm ROI.
 //
 // Returns { data: base64string }; ROI is already aligned.
 function extractClientROI(videoEl, landmarks) {
@@ -275,32 +274,28 @@ function extractClientROI(videoEl, landmarks) {
   const middleMcp = landmarks[MIDDLE_MCP];
   const pinkyMcp  = landmarks[PINKY_MCP];
 
-  // Knuckle-line rotation angle (same logic as calculate_roi in the notebook)
   const dx = (pinkyMcp.x - indexMcp.x) * w;
   const dy = (pinkyMcp.y - indexMcp.y) * h;
   const angleDeg = Math.atan2(dy, dx) * (180 / Math.PI);
 
-  // Rotate the video frame to align the knuckle line to horizontal
-  const knuckleCx = (indexMcp.x + pinkyMcp.x) / 2 * w;
-  const knuckleCy = (indexMcp.y + pinkyMcp.y) / 2 * h;
+  const centerCx = (wrist.x + middleMcp.x) / 2 * w;
+  const centerCy = (wrist.y + middleMcp.y) / 2 * h;
   const rad = angleDeg * (Math.PI / 180);
   const cosA = Math.cos(rad);
   const sinA = Math.sin(rad);
 
-  // Rotate a point around the knuckle midpoint
   function rotPt(px, py) {
-    const rx = cosA * (px - knuckleCx) + sinA * (py - knuckleCy) + knuckleCx;
-    const ry = -sinA * (px - knuckleCx) + cosA * (py - knuckleCy) + knuckleCy;
+    const rx = cosA * (px - centerCx) + sinA * (py - centerCy) + centerCx;
+    const ry = -sinA * (px - centerCx) + cosA * (py - centerCy) + centerCy;
     return [rx, ry];
   }
 
-  const [midRx, midRy]   = rotPt(middleMcp.x * w, middleMcp.y * h);
-  const [wristRx, wristRy] = rotPt(wrist.x * w, wrist.y * h);
-  const [idxRx]           = rotPt(indexMcp.x * w, indexMcp.y * h);
-  const [pnkRx]           = rotPt(pinkyMcp.x * w, pinkyMcp.y * h);
+  const [centerRx, centerRy] = rotPt(centerCx, centerCy);
+  const [idxRx] = rotPt(indexMcp.x * w, indexMcp.y * h);
+  const [pnkRx] = rotPt(pinkyMcp.x * w, pinkyMcp.y * h);
 
-  const cx = Math.round(midRx);
-  const cy = Math.round((midRy + wristRy) / 2);
+  const cx = Math.round(centerRx);
+  const cy = Math.round(centerRy);
   const palmWidth = Math.abs(Math.round(idxRx - pnkRx));
   const roiSize = Math.max(Math.round(palmWidth * 1.5), 60);
   const half = Math.round(roiSize / 2);
@@ -316,9 +311,9 @@ function extractClientROI(videoEl, landmarks) {
   rotCanvas.height = h;
   const rctx = rotCanvas.getContext('2d');
   rctx.save();
-  rctx.translate(knuckleCx, knuckleCy);
+  rctx.translate(centerCx, centerCy);
   rctx.rotate(-rad);
-  rctx.translate(-knuckleCx, -knuckleCy);
+  rctx.translate(-centerCx, -centerCy);
   rctx.drawImage(videoEl, 0, 0, w, h);
   rctx.restore();
 
