@@ -88,7 +88,7 @@ def test_registration_ui_requires_and_sends_nim():
 
     assert "id=\"userNim\"" in html
     assert "const userNim" in source
-    assert "nim: userNim.value.trim()" in source
+    assert "body: JSON.stringify({ nim, name })" in source
     assert "hasNim" in source
 
 
