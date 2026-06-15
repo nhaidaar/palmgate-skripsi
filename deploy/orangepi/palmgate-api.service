@@ -4,6 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
+User=palmgate
+Group=palmgate
 WorkingDirectory=/opt/palmgate
 Environment=MODEL_PATH=/opt/palmgate/palm_embedding.tflite
 Environment=MODEL_METADATA_PATH=/opt/palmgate/model_metadata.json

@@ -17,12 +17,13 @@ def test_compose_does_not_configure_old_notebook_rembg_path():
     assert "NOTEBOOK_REMBG" not in compose
 
 
-def test_usb_compose_uses_logitech_camera_device_path():
+def test_usb_compose_uses_configurable_camera_device_path():
     compose = Path("docker-compose.yml").read_text()
 
     assert "CAMERA_SOURCE=usb" in compose
     assert "CAMERA_DEVICE_PATH=/dev/video1" in compose
-    assert "/dev/v4l/by-id/usb-046d_C270_HD_WEBCAM_4DEFC680-video-index0:/dev/video1" in compose
+    assert "${PALMGATE_CAMERA_DEVICE:-/dev/video0}:/dev/video1" in compose
+    assert "usb-046d_C270_HD_WEBCAM" not in compose
 
 
 def test_usb_compose_uses_separate_preview_and_processing_intervals():

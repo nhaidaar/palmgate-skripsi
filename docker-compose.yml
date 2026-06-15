@@ -51,7 +51,7 @@ services:
       - DEVICE_PREVIEW_FRAME_INTERVAL_MS=33
       - DEVICE_FRAME_INTERVAL_MS=250
     devices:
-      - /dev/v4l/by-id/usb-046d_C270_HD_WEBCAM_4DEFC680-video-index0:/dev/video1
+      - ${PALMGATE_CAMERA_DEVICE:-/dev/video0}:/dev/video1
 
   cloudflared-browser:
     <<: *cloudflared-common

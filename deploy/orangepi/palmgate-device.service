@@ -4,6 +4,9 @@ After=network.target
 
 [Service]
 Type=simple
+User=palmgate
+Group=palmgate
+SupplementaryGroups=video
 WorkingDirectory=/opt/palmgate
 Environment=DEVICE_RUNTIME_ENABLED=1
 Environment=CAMERA_SOURCE=usb

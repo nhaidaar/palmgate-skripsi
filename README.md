@@ -169,6 +169,7 @@ Service files are included in:
 Expected install layout:
 - project root: `/opt/palmgate`
 - virtualenv python: `/opt/palmgate/.venv/bin/python`
+- service account: `palmgate` user/group, with `video` group access for the USB worker
 
 ### API service
 Runs the FastAPI dashboard and browser-testing endpoints.
