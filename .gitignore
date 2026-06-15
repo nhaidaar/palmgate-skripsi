@@ -38,9 +38,9 @@ palmprint.db
 *.sqlite3
 
 # ML model files (large binaries — store separately, not in git)
-// *.tflite
+# *.tflite
 *.tflite.bak
-// *.task
+# *.task
 *.h5
 *.pb
 *.onnx
@@ -60,8 +60,5 @@ desktop.ini
 .env.*
 !.env.example
 
-docs/
-tests/
 Dataset*/
-scripts/
 seeds/

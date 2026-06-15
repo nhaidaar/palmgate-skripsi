@@ -39,7 +39,7 @@ The recommended approach is to keep the current browser scan/register flow for t
 
 ## Implementation Notes
 
-- Keep `palm_recognition.tflite` and `Palm Recognition.ipynb` unchanged for this feature.
+- Use the current `palm_embedding.tflite` runtime model and keep browser-based testing available.
 - Do not remove browser-based scanning; keep it as the easiest test path from iPhone.
 - Favor `tflite_runtime` on Orange Pi. The existing fallback in `app/palm_processor.py:54-66` already supports that direction.
 - Target a USB camera first (`/dev/video0` via OpenCV). Do not introduce GPIO/door-relay work in this change.
@@ -557,7 +557,9 @@ After=network.target
 
 [Service]
 WorkingDirectory=/opt/palmgate
-ExecStart=/opt/palmgate/.venv/Scripts/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+Environment=MODEL_PATH=/opt/palmgate/palm_embedding.tflite
+Environment=MODEL_METADATA_PATH=/opt/palmgate/model_metadata.json
+ExecStart=/opt/palmgate/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 Restart=always
 
 [Install]
@@ -575,7 +577,9 @@ After=network.target
 WorkingDirectory=/opt/palmgate
 Environment=DEVICE_RUNTIME_ENABLED=1
 Environment=CAMERA_SOURCE=usb
-ExecStart=/opt/palmgate/.venv/Scripts/python -m app.device_runtime
+Environment=MODEL_PATH=/opt/palmgate/palm_embedding.tflite
+Environment=MODEL_METADATA_PATH=/opt/palmgate/model_metadata.json
+ExecStart=/opt/palmgate/.venv/bin/python -m app.device_runtime
 Restart=always
 
 [Install]
