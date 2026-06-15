@@ -1,18 +1,79 @@
+import json
 import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-MODEL_PATH = BASE_DIR / "palm_recognition.tflite"
+
+DEFAULT_MODEL_DIR = BASE_DIR / "models" / "embedding"
+DEFAULT_MODEL_FILENAME = "palm_embedding.tflite"
+DEFAULT_MODEL_METADATA_FILENAME = "model_metadata.json"
+DEFAULT_SIMILARITY_THRESHOLD = 0.745932400226593
+DEFAULT_EMBEDDING_DIM = 128
+DEFAULT_TTA_ROTATIONS = (0.0, -6.0, 6.0)
+
+MODEL_PATH = Path(os.getenv("MODEL_PATH", str(DEFAULT_MODEL_DIR / DEFAULT_MODEL_FILENAME)))
+MODEL_METADATA_PATH = Path(os.getenv("MODEL_METADATA_PATH", str(DEFAULT_MODEL_DIR / DEFAULT_MODEL_METADATA_FILENAME)))
 HAND_LANDMARKER_PATH = BASE_DIR / "hand_landmarker.task"
+
+
+def _load_model_metadata(path: Path = MODEL_METADATA_PATH) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+MODEL_METADATA = _load_model_metadata()
+
+APP_HOST = os.getenv("APP_HOST", "127.0.0.1")
+APP_PORT = int(os.getenv("APP_PORT", "8000"))
 
 # DB_PATH can be overridden via environment variable for Docker deployments
 # e.g. DB_PATH=/data/palmprint.db → mount a named volume at /data
 DB_PATH = Path(os.getenv("DB_PATH", str(BASE_DIR / "palmprint.db")))
 
-SIMILARITY_THRESHOLD = 0.75
-DUPLICATE_THRESHOLD  = 0.75   # block registration if palm already matches at this level
-REGISTRATION_CAPTURES = 5
+DEVICE_RUNTIME_ENABLED = os.getenv("DEVICE_RUNTIME_ENABLED", "0") == "1"
+CAMERA_SOURCE = os.getenv("CAMERA_SOURCE", "browser")
+CAMERA_DEVICE_INDEX = int(os.getenv("CAMERA_DEVICE_INDEX", "0"))
+CAMERA_DEVICE_PATH = os.getenv("CAMERA_DEVICE_PATH")
+DEVICE_FRAME_INTERVAL_MS = int(os.getenv("DEVICE_FRAME_INTERVAL_MS", "250"))
+DEVICE_PREVIEW_FRAME_INTERVAL_MS = int(os.getenv("DEVICE_PREVIEW_FRAME_INTERVAL_MS", "33"))
+DEVICE_HOLD_MS = int(os.getenv("DEVICE_HOLD_MS", "1200"))
+DEVICE_COOLDOWN_MS = int(os.getenv("DEVICE_COOLDOWN_MS", "3000"))
+DEVICE_STATUS_HEARTBEAT_MS = int(os.getenv("DEVICE_STATUS_HEARTBEAT_MS", "1000"))
+NOTEBOOK_REMBG_ENABLED = os.getenv("NOTEBOOK_REMBG_ENABLED", "1") == "1"
+NOTEBOOK_REMBG_MODEL = os.getenv("NOTEBOOK_REMBG_MODEL", "u2net")
+
+EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", str(MODEL_METADATA.get("embedding_dim", DEFAULT_EMBEDDING_DIM))))
+SIMILARITY_THRESHOLD = float(os.getenv(
+    "SIMILARITY_THRESHOLD",
+    str(MODEL_METADATA.get("operating_threshold", DEFAULT_SIMILARITY_THRESHOLD)),
+))
+DUPLICATE_THRESHOLD = float(os.getenv("DUPLICATE_THRESHOLD", str(SIMILARITY_THRESHOLD)))
+
+_tta_value = MODEL_METADATA.get("tta_rotations", DEFAULT_TTA_ROTATIONS)
+TTA_ROTATIONS = tuple(float(value) for value in _tta_value)
+ENROLLMENT_TTA_ENABLED = os.getenv("ENROLLMENT_TTA_ENABLED", "1") == "1"
+RECOGNITION_TTA_ENABLED = os.getenv("RECOGNITION_TTA_ENABLED", "0") == "1"
+
+REGISTRATION_HANDS = ("left", "right")
+REGISTRATION_CAPTURES_PER_HAND = 5
+REGISTRATION_TOTAL_CAPTURES = REGISTRATION_CAPTURES_PER_HAND * len(REGISTRATION_HANDS)
+REGISTRATION_STORE_EMBEDDINGS_PER_HAND = 1
+REGISTRATION_MIN_VALID_PER_HAND = 5
+REGISTRATION_CAPTURES = REGISTRATION_TOTAL_CAPTURES
+USB_REGISTRATION_CAPTURES = REGISTRATION_TOTAL_CAPTURES
+USB_REGISTRATION_STORE_EMBEDDINGS = REGISTRATION_STORE_EMBEDDINGS_PER_HAND
+USB_REGISTRATION_MIN_VALID = REGISTRATION_MIN_VALID_PER_HAND
+USB_REGISTRATION_MIN_BLUR = 70.0
+USB_REGISTRATION_MIN_BRIGHTNESS = 45.0
+USB_REGISTRATION_MAX_BRIGHTNESS = 220.0
 
 IMG_SIZE = (224, 224)
 CLAHE_CLIP_LIMIT = 2.0
 CLAHE_TILE_GRID = (8, 8)
+MIN_PALM_WIDTH = 40.0
+PALM_ROI_SCALE = 1.5

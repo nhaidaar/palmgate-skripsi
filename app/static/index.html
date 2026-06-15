@@ -172,6 +172,13 @@
             </div>
           </div>
 
+          <div class="device-status-card" id="deviceStatusCard">
+            <div class="device-status-row"><span>Worker</span><strong id="deviceWorkerState">disabled</strong></div>
+            <div class="device-status-row"><span>Camera</span><strong id="deviceCameraState">offline</strong></div>
+            <div class="device-status-row"><span>FPS</span><strong id="deviceFps">—</strong></div>
+            <div class="device-status-row"><span>Last recognition</span><strong id="deviceLastRecognition">—</strong></div>
+          </div>
+
           <!-- Mini stats -->
           <div class="mini-stats">
             <div class="stat-item">
@@ -201,48 +208,71 @@
 
     <!-- ==================== REGISTER PANEL ==================== -->
     <section class="panel" id="panel-register">
-      <div class="register-layout">
+      <div class="register-layout unified">
 
         <div class="register-camera-col">
           <div class="camera-frame reg-camera" id="regCameraFrame">
+            <!-- Browser camera video (hidden in USB mode) -->
             <video id="videoReg" autoplay playsinline muted></video>
+            <!-- USB camera preview (hidden in browser mode) -->
+            <img id="usbRegistrationPreview" class="usb-preview" alt="USB camera preview" style="display:none;" />
+
             <canvas id="overlayCanvasReg" class="overlay-canvas"></canvas>
 
-            <!-- Register auto-capture ring -->
+            <!-- Hand position guide overlay -->
+            <svg class="hand-guide-overlay" id="handGuideOverlay" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
+              <!-- Target size ring -->
+              <circle class="guide-size-ring" id="guideSizeRing" cx="50" cy="50" r="35" fill="none" stroke-width="2" stroke-dasharray="4 2"/>
+              <!-- Center crosshair -->
+              <line class="guide-crosshair" id="guideCrossH" x1="45" y1="50" x2="55" y2="50" stroke-width="1"/>
+              <line class="guide-crosshair" id="guideCrossV" x1="50" y1="45" x2="50" y2="55" stroke-width="1"/>
+              <!-- Rotation indicator arc -->
+              <path class="guide-rotation-arc" id="guideRotationArc" d="" fill="none" stroke-width="2"/>
+            </svg>
+
+            <!-- Auto-scan countdown ring -->
             <div class="autoscan-ring" id="autoscanRingReg" style="display:none;">
               <svg viewBox="0 0 100 100" class="ring-svg">
                 <circle class="ring-track" cx="50" cy="50" r="42"/>
-                <circle class="ring-fill"  cx="50" cy="50" r="42" id="ringFillReg"/>
+                <circle class="ring-fill" cx="50" cy="50" r="42" id="ringFillReg"/>
               </svg>
               <span class="ring-label" id="ringLabelReg">Hold</span>
             </div>
 
+            <!-- Palm guide (fallback when no metrics) -->
             <div class="palm-guide" id="palmGuideReg">
               <div class="guide-ring outer"></div>
               <div class="guide-label">Align palm</div>
             </div>
 
             <div class="capture-flash" id="captureFlashReg"></div>
-
-            <!-- Brightness indicator -->
             <div class="brightness-badge" id="brightnessBadgeReg" style="display:none;"></div>
-
-            <div class="capture-counter" id="captureCounter">0 / 5</div>
           </div>
 
-          <button class="btn btn-secondary btn-capture" id="btnCapture">
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-              <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.5"/>
-              <circle cx="9" cy="9" r="3" fill="currentColor"/>
-            </svg>
-            Capture
-          </button>
+          <!-- Guidance metrics display -->
+          <div class="guidance-metrics" id="guidanceMetrics">
+            <div class="metric-item" id="metricSize"><span class="metric-icon">↕</span> Size: <strong>--</strong></div>
+            <div class="metric-item" id="metricRotation"><span class="metric-icon">↺</span> Rotation: <strong>--</strong></div>
+            <div class="metric-item" id="metricPosition"><span class="metric-icon">↔</span> Position: <strong>--</strong></div>
+          </div>
         </div>
 
         <div class="register-form-col">
           <div class="form-block">
             <h2 class="form-title">Register new user</h2>
-            <p class="form-desc">Hold your palm open and still — auto-capture takes 5 samples automatically.</p>
+            <p class="form-desc">Follow 5 left-hand and 5 right-hand captures to enroll. PalmGate stores both palms so either hand can unlock.</p>
+
+            <div class="field-group">
+              <label class="field-label" for="userNim">NIM</label>
+              <input
+                class="field-input"
+                type="text"
+                id="userNim"
+                placeholder="Enter NIM…"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </div>
 
             <div class="field-group">
               <label class="field-label" for="userName">Full name</label>
@@ -256,35 +286,42 @@
               />
             </div>
 
-            <div class="captures-row">
-              <span class="captures-label">Samples captured</span>
-              <div class="capture-dots" id="captureDots">
-                <span class="dot" data-i="0"></span>
-                <span class="dot" data-i="1"></span>
-                <span class="dot" data-i="2"></span>
-                <span class="dot" data-i="3"></span>
-                <span class="dot" data-i="4"></span>
+            <div class="registration-status" id="registrationStatus">
+              <div class="sample-title" id="regSampleTitle">Left hand sample 1/5: Center palm</div>
+              <div class="sample-desc" id="regSampleDesc">Use your actual left hand: palm facing camera, fingers up, wrist visible.</div>
+              <div class="capture-counter-inline">Samples captured: <strong id="captureCounter">Left 0/5 · Right 0/5</strong></div>
+              <div class="capture-dots hand-dots" id="captureDots">
+                <div class="capture-dot-group" data-hand="left">
+                  <span class="dot-label">Left</span>
+                  <span class="dot" data-hand="left" data-i="0"></span>
+                  <span class="dot" data-hand="left" data-i="1"></span>
+                  <span class="dot" data-hand="left" data-i="2"></span>
+                  <span class="dot" data-hand="left" data-i="3"></span>
+                  <span class="dot" data-hand="left" data-i="4"></span>
+                </div>
+                <div class="capture-dot-group" data-hand="right">
+                  <span class="dot-label">Right</span>
+                  <span class="dot" data-hand="right" data-i="0"></span>
+                  <span class="dot" data-hand="right" data-i="1"></span>
+                  <span class="dot" data-hand="right" data-i="2"></span>
+                  <span class="dot" data-hand="right" data-i="3"></span>
+                  <span class="dot" data-hand="right" data-i="4"></span>
+                </div>
               </div>
+              <ul class="quality-list" id="qualityList">
+                <li><span>Status</span><strong class="neutral">Enter NIM and name to start</strong></li>
+              </ul>
             </div>
 
             <div class="register-hint" id="registerHint">
-              Enter a name, then hold your palm in front of the camera.
+              Enter NIM and name, then start registration to capture 5 left-hand and 5 right-hand samples.
             </div>
 
             <div class="register-actions">
-              <button class="btn btn-primary btn-register" id="btnRegister" disabled>
-                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                  <path d="M3 9l4 4 8-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                Register
-              </button>
-              <button class="btn btn-ghost btn-reset-captures" id="btnReset" disabled aria-label="Clear all captured samples and start over">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <path d="M2 8a6 6 0 1 0 1.5-3.9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                  <path d="M2 4v4h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                Reset
-              </button>
+              <button class="btn btn-primary" id="btnStartRegistration">Start registration</button>
+              <button class="btn btn-secondary" id="btnCaptureSample" disabled>Capture sample</button>
+              <button class="btn btn-primary" id="btnFinalizeRegistration" disabled>Finalize</button>
+              <button class="btn btn-ghost" id="btnCancelRegistration" disabled>Cancel</button>
             </div>
 
             <div class="register-feedback" id="registerFeedback"></div>
@@ -315,11 +352,13 @@
               <th>Name</th>
               <th>Status</th>
               <th>Match %</th>
+              <th>Duration</th>
+              <th>Description</th>
             </tr>
           </thead>
           <tbody id="logTableBody">
             <tr class="log-empty-row">
-              <td colspan="4">
+              <td colspan="6">
                 <div class="log-empty">
                   <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
                     <path d="M8 12h24M8 20h16M8 28h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>

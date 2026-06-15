@@ -3,14 +3,26 @@
    Browser-side: MediaPipe hand detection + client ROI crop
 ================================================================ */
 
-import { HandLandmarker, FilesetResolver, DrawingUtils }
-  from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
+// MediaPipe imports - loaded dynamically to avoid blocking if CDN fails
+let HandLandmarker, FilesetResolver, DrawingUtils;
 
 // ── Timing constants ─────────────────────────────────────────────
 const SCAN_HOLD_MS     = 800;    // hold steady before auto-scan triggers
 const REG_HOLD_MS      = 1000;   // hold steady before auto-capture
 const REG_COOLDOWN_MS  = 1500;   // gap between auto-captures
 const SCAN_COOLDOWN_MS = 3000;   // cooldown after scan result
+const USB_PREVIEW_STREAM_URL = '/api/device-registration/preview.mjpg';
+
+const REGISTRATION_HANDS = ['left', 'right'];
+const REGISTRATION_CAPTURES_PER_HAND = 5;
+const REGISTRATION_TOTAL_CAPTURES = REGISTRATION_HANDS.length * REGISTRATION_CAPTURES_PER_HAND;
+const REGISTRATION_POSES = [
+  { key: 'center', label: 'Center palm', desc: 'Palm facing camera, fingers up, wrist visible.' },
+  { key: 'closer', label: 'Move closer', desc: 'Move closer while keeping the full hand visible.' },
+  { key: 'farther', label: 'Move farther', desc: 'Move farther while keeping palm lines visible.' },
+  { key: 'rotate_left', label: 'Rotate slightly left', desc: 'Tilt the palm slightly left on screen.' },
+  { key: 'rotate_right', label: 'Rotate slightly right', desc: 'Tilt the palm slightly right on screen.' },
+];
 
 // Ring circumference for r=42: 2π×42 ≈ 263.9
 const RING_C = 2 * Math.PI * 42;
@@ -23,13 +35,21 @@ const state = {
   stream: null,
   currentTab: 'scan',
   autoMode: true,
-  capturedImages: [],   // [{ data: base64, isRoi: bool }]
+  usbDeviceMode: false,
+  usbScanEventSource: null,
+  // Registration state
+  registrationActive: false,
+  registrationStatusTimer: null,
+  capturedSamples: [],
+  registrationCounts: { left: 0, right: 0 },
+  currentSampleIndex: 0,
+  lastGuidance: null,
+  // Scan state
   handSeenMs: 0,
   lastFrameTs: null,
-  lastLandmarks: null,  // most recent mediapipe landmarks for ROI extraction
+  lastLandmarks: null,
   scanBusy: false,
   scanCooldownUntil: 0,
-  regCooldownUntil: 0,
   scanStats: { total: 0, allowed: 0, denied: 0, users: 0 },
 };
 
@@ -43,11 +63,15 @@ const overlayCanvas    = $('overlayCanvas');
 const overlayCanvasReg = $('overlayCanvasReg');
 const btnScan          = $('btnScan');
 const btnMode          = $('btnMode');
-const btnCapture       = $('btnCapture');
-const btnRegister      = $('btnRegister');
 const btnRefresh       = $('btnRefresh');
-const btnReset         = $('btnReset');
 const userName         = $('userName');
+const userNim          = $('userNim');
+const usbRegistrationPreview = $('usbRegistrationPreview');
+// Unified registration buttons
+const btnStartRegistration = $('btnStartRegistration');
+const btnCaptureSample = $('btnCaptureSample');
+const btnFinalizeRegistration = $('btnFinalizeRegistration');
+const btnCancelRegistration = $('btnCancelRegistration');
 
 // ── MediaPipe init ───────────────────────────────────────────────
 let handLandmarker = null;
@@ -55,6 +79,12 @@ let drawUtils      = null;
 
 async function initMediaPipe() {
   try {
+    // Dynamic import to avoid blocking page load if CDN fails
+    const mediapipe = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
+    HandLandmarker = mediapipe.HandLandmarker;
+    FilesetResolver = mediapipe.FilesetResolver;
+    DrawingUtils = mediapipe.DrawingUtils;
+
     const vision = await FilesetResolver.forVisionTasks(
       'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
     );
@@ -73,12 +103,14 @@ async function initMediaPipe() {
 
     drawUtils = new DrawingUtils(overlayCanvas.getContext('2d'));
     console.log('[PalmAccess] MediaPipe HandLandmarker ready');
-    $('cameraStatus').innerHTML = '<span class="cam-dot"></span>Ready';
+    const cameraStatus = $('cameraStatus');
+    if (cameraStatus) cameraStatus.innerHTML = '<span class="cam-dot"></span>Ready';
     startDetectLoop();
   } catch (err) {
     console.warn('[PalmAccess] MediaPipe failed — falling back to manual mode', err);
     setAutoMode(false);
-    $('cameraStatus').textContent = 'Manual mode';
+    const cameraStatus = $('cameraStatus');
+    if (cameraStatus) cameraStatus.textContent = 'Manual mode';
   }
 }
 
@@ -118,6 +150,13 @@ function detectLoop(ts) {
       updateBrightnessBadge(video, result.landmarks[0], 'brightnessBadge');
     } else {
       updateBrightnessBadge(videoReg, result.landmarks[0], 'brightnessBadgeReg');
+      // Update hand guide overlay in real-time during browser registration
+      if (state.registrationActive && !state.usbDeviceMode) {
+        const metrics = computeBrowserMetrics();
+        state.lastGuidance = evaluateBrowserGuidance(metrics);
+        updateHandGuideOverlay(metrics);
+        updateRegistrationUI();
+      }
     }
   } else {
     state.handSeenMs = Math.max(0, state.handSeenMs - dt * 2.5);
@@ -126,6 +165,10 @@ function detectLoop(ts) {
       state.lastLandmarks = null;
       $('brightnessBadge').style.display    = 'none';
       $('brightnessBadgeReg').style.display = 'none';
+      // Clear hand guide overlay when no hand detected
+      if (state.currentTab === 'register' && state.registrationActive && !state.usbDeviceMode) {
+        updateHandGuideOverlay(null);
+      }
     }
     updateRingProgress();
   }
@@ -143,6 +186,7 @@ function drawLandmarks(result, cvs) {
   ctx.clearRect(0, 0, cvs.width, cvs.height);
 
   if (!result.landmarks || !result.landmarks.length) return;
+  if (!HandLandmarker || !DrawingUtils) return;
 
   const du = new DrawingUtils(ctx);
   for (const lm of result.landmarks) {
@@ -217,11 +261,10 @@ function updateBrightnessBadge(videoEl, landmarks, badgeId) {
 // computed by the browser's MediaPipe instance. Sends a small JPEG crop
 // instead of a full-resolution PNG, eliminating server-side detection.
 //
-// Also mirrors the notebook's calculate_roi rotation step: the knuckle line
-// (index-MCP → pinky-MCP) is rotated to horizontal before cropping so the
-// crop matches the training data distribution.
+// Mirrors server-side PalmProcessor.extract_palm_roi(): rotate around the
+// wrist/middle-MCP palm center, then crop from the aligned palm ROI.
 //
-// Returns { data: base64string, rotationAngle: degrees }
+// Returns { data: base64string }; ROI is already aligned.
 function extractClientROI(videoEl, landmarks) {
   const w = videoEl.videoWidth  || 640;
   const h = videoEl.videoHeight || 480;
@@ -231,32 +274,28 @@ function extractClientROI(videoEl, landmarks) {
   const middleMcp = landmarks[MIDDLE_MCP];
   const pinkyMcp  = landmarks[PINKY_MCP];
 
-  // Knuckle-line rotation angle (same logic as calculate_roi in the notebook)
   const dx = (pinkyMcp.x - indexMcp.x) * w;
   const dy = (pinkyMcp.y - indexMcp.y) * h;
-  const rotationAngle = Math.atan2(dy, dx) * (180 / Math.PI);
+  const angleDeg = Math.atan2(dy, dx) * (180 / Math.PI);
 
-  // Rotate the video frame to align the knuckle line to horizontal
-  const knuckleCx = (indexMcp.x + pinkyMcp.x) / 2 * w;
-  const knuckleCy = (indexMcp.y + pinkyMcp.y) / 2 * h;
-  const rad = rotationAngle * (Math.PI / 180);
+  const centerCx = (wrist.x + middleMcp.x) / 2 * w;
+  const centerCy = (wrist.y + middleMcp.y) / 2 * h;
+  const rad = angleDeg * (Math.PI / 180);
   const cosA = Math.cos(rad);
   const sinA = Math.sin(rad);
 
-  // Rotate a point around the knuckle midpoint
   function rotPt(px, py) {
-    const rx = cosA * (px - knuckleCx) + sinA * (py - knuckleCy) + knuckleCx;
-    const ry = -sinA * (px - knuckleCx) + cosA * (py - knuckleCy) + knuckleCy;
+    const rx = cosA * (px - centerCx) + sinA * (py - centerCy) + centerCx;
+    const ry = -sinA * (px - centerCx) + cosA * (py - centerCy) + centerCy;
     return [rx, ry];
   }
 
-  const [midRx, midRy]   = rotPt(middleMcp.x * w, middleMcp.y * h);
-  const [wristRx, wristRy] = rotPt(wrist.x * w, wrist.y * h);
-  const [idxRx]           = rotPt(indexMcp.x * w, indexMcp.y * h);
-  const [pnkRx]           = rotPt(pinkyMcp.x * w, pinkyMcp.y * h);
+  const [centerRx, centerRy] = rotPt(centerCx, centerCy);
+  const [idxRx] = rotPt(indexMcp.x * w, indexMcp.y * h);
+  const [pnkRx] = rotPt(pinkyMcp.x * w, pinkyMcp.y * h);
 
-  const cx = Math.round(midRx);
-  const cy = Math.round((midRy + wristRy) / 2);
+  const cx = Math.round(centerRx);
+  const cy = Math.round(centerRy);
   const palmWidth = Math.abs(Math.round(idxRx - pnkRx));
   const roiSize = Math.max(Math.round(palmWidth * 1.5), 60);
   const half = Math.round(roiSize / 2);
@@ -272,9 +311,9 @@ function extractClientROI(videoEl, landmarks) {
   rotCanvas.height = h;
   const rctx = rotCanvas.getContext('2d');
   rctx.save();
-  rctx.translate(knuckleCx, knuckleCy);
+  rctx.translate(centerCx, centerCy);
   rctx.rotate(-rad);
-  rctx.translate(-knuckleCx, -knuckleCy);
+  rctx.translate(-centerCx, -centerCy);
   rctx.drawImage(videoEl, 0, 0, w, h);
   rctx.restore();
 
@@ -283,7 +322,7 @@ function extractClientROI(videoEl, landmarks) {
   roiCanvas.height = cropH;
   roiCanvas.getContext('2d').drawImage(rotCanvas, x1, y1, cropW, cropH, 0, 0, cropW, cropH);
 
-  return { data: roiCanvas.toDataURL('image/jpeg', 0.9), rotationAngle };
+  return { data: roiCanvas.toDataURL('image/jpeg', 0.9) };
 }
 
 // ── Ring progress ────────────────────────────────────────────────
@@ -308,19 +347,9 @@ function updateRingProgress() {
   }
 
   if (tab === 'register') {
-    const holdMs = REG_HOLD_MS;
-    const ring   = $('autoscanRingReg');
-    const fill   = $('ringFillReg');
-    const label  = $('ringLabelReg');
-    const pct    = Math.min(state.handSeenMs / holdMs, 1);
-
-    if (state.handSeenMs > 20 && state.capturedImages.length < 5 && Date.now() >= state.regCooldownUntil) {
-      ring.style.display = 'block';
-      fill.style.strokeDashoffset = RING_C * (1 - pct);
-      label.textContent = pct >= 1 ? '✓' : 'Hold';
-    } else {
-      ring.style.display = 'none';
-    }
+    // Registration ring is handled by the registration status polling
+    // Hide the ring when not in browser mode with active registration
+    $('autoscanRingReg').style.display = 'none';
   }
 }
 
@@ -336,19 +365,7 @@ function runAutoLogic() {
     }
   }
 
-  if (state.currentTab === 'register') {
-    const hasName = userName.value.trim().length > 0;
-    if (
-      state.handSeenMs >= REG_HOLD_MS &&
-      state.capturedImages.length < 5 &&
-      now >= state.regCooldownUntil &&
-      hasName
-    ) {
-      triggerCapture();
-      state.regCooldownUntil = now + REG_COOLDOWN_MS;
-      state.handSeenMs = 0;
-    }
-  }
+  // Registration auto-capture is handled by the registration status polling
 }
 
 // ── Camera hand-detected visual state ────────────────────────────
@@ -379,6 +396,61 @@ async function startCamera() {
     $('cameraStatus').textContent = 'Camera error';
     console.error('Camera error:', err);
   }
+}
+
+function ensureUsbScanPreview() {
+  video.style.display = 'none';
+  let preview = $('usbPreview');
+  if (!preview) {
+    preview = document.createElement('img');
+    preview.id = 'usbPreview';
+    preview.className = 'usb-preview';
+    $('cameraFrame').prepend(preview);
+  }
+  return preview;
+}
+
+function setUsbPreviewStream(img, active) {
+  if (!img) return;
+  if (active) {
+    if (!img.src.includes(USB_PREVIEW_STREAM_URL)) {
+      img.src = `${USB_PREVIEW_STREAM_URL}?t=${Date.now()}`;
+    }
+  } else {
+    img.removeAttribute('src');
+  }
+}
+
+function syncUsbPreviewTarget() {
+  if (!state.usbDeviceMode) return;
+  const scanPreview = ensureUsbScanPreview();
+  setUsbPreviewStream(scanPreview, state.currentTab === 'scan');
+  setUsbPreviewStream(usbRegistrationPreview, state.currentTab === 'register');
+}
+
+function startUsbPreview() {
+  ensureUsbScanPreview();
+  syncUsbPreviewTarget();
+  $('cameraStatus').innerHTML = '<span class="cam-dot"></span>USB camera active';
+}
+
+function startUsbScanEvents() {
+  if (state.usbScanEventSource) return;
+  state.usbScanEventSource = new EventSource('/api/device-registration/scan-events');
+  state.usbScanEventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.stage === 'recognized' && data.result) {
+        showResult(data.result, null);
+        updateStats(data.result.status);
+      }
+    } catch (err) {
+      console.error('[PalmAccess] SSE parse error:', err);
+    }
+  };
+  state.usbScanEventSource.onerror = () => {
+    console.warn('[PalmAccess] SSE connection lost, reconnecting...');
+  };
 }
 
 function captureFrame(videoEl) {
@@ -418,6 +490,10 @@ function switchTab(tab) {
     loadLogs();
     loadUsers();
   }
+
+  if (state.usbDeviceMode) {
+    syncUsbPreviewTarget();
+  }
 }
 
 // ── Auto / Manual mode toggle ────────────────────────────────────
@@ -447,18 +523,14 @@ async function triggerScan() {
   triggerFlash('captureFlash');
   showScanning();
 
-  // Prefer client-side ROI crop (skips server MediaPipe, saves ~500–1500ms).
-  // Also send the knuckle-line rotation angle so the server can de-rotate the
-  // ROI before preprocessing, matching the training pipeline.
-  let b64, isRoi, rotationAngle = 0;
+  // Use client-side ROI extraction if landmarks available (matches registration pipeline)
+  let b64, isRoi = false;
   if (state.lastLandmarks && state.lastLandmarks.length > 0) {
     const roi = extractClientROI(video, state.lastLandmarks[0]);
-    b64           = roi.data;
-    rotationAngle = roi.rotationAngle;
+    b64 = roi.data;
     isRoi = true;
   } else {
-    b64   = captureFrame(video);
-    isRoi = false;
+    b64 = captureFrame(video);
   }
 
   const scanStart = performance.now();
@@ -467,7 +539,7 @@ async function triggerScan() {
     const res = await fetch('/api/recognize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: b64, is_roi: isRoi, rotation_angle: rotationAngle }),
+      body: JSON.stringify({ image: b64, is_roi: isRoi }),
     });
     const elapsed = Math.round(performance.now() - scanStart);
 
@@ -549,138 +621,491 @@ function updateStats(status) {
   $('statDenied').textContent  = state.scanStats.denied;
 }
 
-// ── Register ─────────────────────────────────────────────────────
-btnCapture.addEventListener('click', () => triggerCapture());
+// ── Unified Registration ─────────────────────────────────────────
+// Sample targets matching server-side SAMPLE_TARGETS
+const SAMPLE_TARGETS = [
+  { key: 'center', label: 'Center palm', minHeight: 0.50, maxHeight: 0.60, minRot: -5, maxRot: 5, minCx: 0.40, maxCx: 0.60 },
+  { key: 'closer', label: 'Move closer', minHeight: 0.65, maxHeight: 0.75, minRot: -5, maxRot: 5, minCx: 0.40, maxCx: 0.60 },
+  { key: 'farther', label: 'Move farther', minHeight: 0.38, maxHeight: 0.48, minRot: -5, maxRot: 5, minCx: 0.40, maxCx: 0.60 },
+  { key: 'rotate_left', label: 'Rotate left', minHeight: 0.50, maxHeight: 0.60, minRot: -15, maxRot: -8, minCx: 0.40, maxCx: 0.60 },
+  { key: 'rotate_right', label: 'Rotate right', minHeight: 0.50, maxHeight: 0.60, minRot: 8, maxRot: 15, minCx: 0.40, maxCx: 0.60 },
+];
 
-btnReset?.addEventListener('click', () => {
-  const savedName = userName.value;
-  resetRegistration();
-  userName.value = savedName;
-  setFeedback('', '');
-});
+function getCurrentRegistrationHand() {
+  const index = Math.min(state.currentSampleIndex, REGISTRATION_TOTAL_CAPTURES - 1);
+  return REGISTRATION_HANDS[Math.floor(index / REGISTRATION_CAPTURES_PER_HAND)];
+}
 
-function triggerCapture() {
-  if (state.capturedImages.length >= 5) return;
+function getCurrentPoseIndex() {
+  const currentSampleIndex = Math.min(state.currentSampleIndex, REGISTRATION_TOTAL_CAPTURES - 1);
+  return currentSampleIndex % SAMPLE_TARGETS.length;
+}
 
-  let b64, isRoi, rotationAngle = 0;
-  if (state.lastLandmarks && state.lastLandmarks.length > 0) {
-    const roi = extractClientROI(videoReg, state.lastLandmarks[0]);
-    b64           = roi.data;
-    rotationAngle = roi.rotationAngle;
-    isRoi = true;
-  } else {
-    b64   = captureFrame(videoReg);
-    isRoi = false;
+function getRegistrationCounts() {
+  if (state.usbDeviceMode) return state.registrationCounts;
+  return {
+    left: state.capturedSamples.filter((sample) => sample.hand === 'left').length,
+    right: state.capturedSamples.filter((sample) => sample.hand === 'right').length,
+  };
+}
+
+function isRegistrationComplete() {
+  const { left: leftCount, right: rightCount } = getRegistrationCounts();
+  return leftCount === REGISTRATION_CAPTURES_PER_HAND && rightCount === REGISTRATION_CAPTURES_PER_HAND;
+}
+
+function getCurrentSamplePrompt() {
+  const hand = getCurrentRegistrationHand();
+  const poseIndex = getCurrentPoseIndex();
+  const pose = REGISTRATION_POSES[poseIndex];
+  const handLabel = hand[0].toUpperCase() + hand.slice(1);
+  return {
+    title: `${handLabel} hand sample ${poseIndex + 1}/${REGISTRATION_CAPTURES_PER_HAND}: ${pose.label}`,
+    desc: `Use your actual ${hand} hand. ${pose.desc} Keep the inside palm facing the camera.`,
+  };
+}
+
+btnStartRegistration?.addEventListener('click', async () => {
+  const nim = userNim.value.trim();
+  const name = userName.value.trim();
+  if (!nim) return setFeedback('NIM is required', 'error');
+  if (!name) return setFeedback('Name is required', 'error');
+
+  if (state.usbDeviceMode) {
+    const result = await apiStartRegistration(nim, name);
+    if (result.detail) return setFeedback(result.detail, 'error');
   }
 
-  triggerFlash('captureFlashReg');
-  state.capturedImages.push({ data: b64, isRoi, rotationAngle });
+  state.registrationActive = true;
+  state.capturedSamples = [];
+  state.registrationCounts = { left: 0, right: 0 };
+  state.currentSampleIndex = 0;
+  setFeedback('Registration started. Capture 5 left-hand and 5 right-hand samples.', 'success');
+  startRegistrationStatusPolling();
+  updateRegistrationUI();
+});
 
-  const count = state.capturedImages.length;
-  $('captureCounter').textContent = `${count} / 5`;
-  if (btnReset) btnReset.disabled = false;
+btnCaptureSample?.addEventListener('click', async () => {
+  if (!state.registrationActive) return;
 
-  document.querySelectorAll('.dot').forEach((dot, i) =>
-    dot.classList.toggle('filled', i < count)
-  );
-
-  // In-camera pips
-  document.querySelectorAll('.cam-pip').forEach((pip, i) =>
-    pip.classList.toggle('filled', i < count)
-  );
-
-  if (count >= 5) {
-    btnRegister.disabled = !userName.value.trim();
-    $('registerHint').textContent = 'All 5 samples captured. Press Register.';
-    $('autoscanRingReg').style.display = 'none';
+  if (state.usbDeviceMode) {
+    const result = await apiCaptureSample();
+    if (result.detail) return setFeedback(result.detail, 'error');
+    triggerFlash('captureFlashReg');
+    setFeedback(`Captured sample ${result.sample_index + 1}.`, 'success');
+    await refreshRegistrationStatus();
   } else {
-    $('registerHint').textContent =
-      `${5 - count} more sample${5 - count > 1 ? 's' : ''} needed — hold still.`;
+    captureBrowserSample();
+  }
+});
+
+btnFinalizeRegistration?.addEventListener('click', async () => {
+  if (state.usbDeviceMode) {
+    const result = await apiFinalizeRegistration();
+    if (result.detail) return setFeedback(result.detail, 'error');
+    setFeedback(`✓ ${result.name} enrolled successfully`, 'success');
+  } else {
+    await finalizeBrowserRegistration();
+  }
+  resetRegistration();
+  await loadUsers();
+  await loadStats();
+});
+
+btnCancelRegistration?.addEventListener('click', async () => {
+  if (state.usbDeviceMode) {
+    await apiCancelRegistration();
+  }
+  resetRegistration();
+  setFeedback('Registration cancelled.', '');
+});
+
+// API calls for USB mode
+async function apiStartRegistration(nim, name) {
+  const res = await fetch('/api/device-registration/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nim, name }),
+  });
+  return await res.json();
+}
+
+async function apiGetRegistrationStatus() {
+  const res = await fetch('/api/device-registration/status');
+  return await res.json();
+}
+
+async function apiCaptureSample() {
+  const res = await fetch('/api/device-registration/capture', { method: 'POST' });
+  return await res.json();
+}
+
+async function apiFinalizeRegistration() {
+  const res = await fetch('/api/device-registration/finalize', { method: 'POST' });
+  return await res.json();
+}
+
+async function apiCancelRegistration() {
+  const res = await fetch('/api/device-registration/cancel', { method: 'POST' });
+  return await res.json();
+}
+
+function startRegistrationStatusPolling() {
+  stopRegistrationStatusPolling();
+  state.registrationStatusTimer = setInterval(refreshRegistrationStatus, 500);
+}
+
+function stopRegistrationStatusPolling() {
+  if (state.registrationStatusTimer) clearInterval(state.registrationStatusTimer);
+  state.registrationStatusTimer = null;
+}
+
+async function refreshRegistrationStatus() {
+  if (state.usbDeviceMode) {
+    const status = await apiGetRegistrationStatus();
+    state.currentSampleIndex = status.current_sample_index || 0;
+    state.capturedSamples = new Array(status.captured_count || 0);
+    state.registrationCounts = { left: status.left_count || 0, right: status.right_count || 0 };
+    state.lastGuidance = status.guidance;
+    updateRegistrationUI();
+    updateHandGuideOverlay(status.guidance?.metrics);
+  } else {
+    const metrics = computeBrowserMetrics();
+    state.lastGuidance = evaluateBrowserGuidance(metrics);
+    updateRegistrationUI();
+    updateHandGuideOverlay(metrics);
   }
 }
 
-userName.addEventListener('input', () => {
-  btnRegister.disabled = state.capturedImages.length < 5 || !userName.value.trim();
-});
+// Browser mode: compute metrics from MediaPipe landmarks
+function computeBrowserMetrics() {
+  if (!state.lastLandmarks || !state.lastLandmarks.length) {
+    return { hand_detected: false };
+  }
+  const lm = state.lastLandmarks[0];
+  const w = videoReg.videoWidth || 640;
+  const h = videoReg.videoHeight || 480;
 
-btnRegister.addEventListener('click', async () => {
+  const wrist = lm[WRIST];
+  const indexMcp = lm[INDEX_MCP];
+  const middleMcp = lm[MIDDLE_MCP];
+  const pinkyMcp = lm[PINKY_MCP];
+
+  // Height ratio (hand size relative to frame)
+  const minY = Math.min(...lm.map(p => p.y));
+  const maxY = Math.max(...lm.map(p => p.y));
+  const heightRatio = maxY - minY;
+
+  // Rotation (knuckle line angle)
+  const dx = (pinkyMcp.x - indexMcp.x) * w;
+  const dy = (pinkyMcp.y - indexMcp.y) * h;
+  const rotationDegrees = Math.atan2(dy, dx) * (180 / Math.PI);
+
+  // Center X position
+  const centerX = (indexMcp.x + pinkyMcp.x) / 2;
+
+  // Check if hand is clipped (any landmark near edge)
+  const margin = 0.05;
+  const handClipped = lm.some(p => p.x < margin || p.x > 1 - margin || p.y < margin || p.y > 1 - margin);
+
+  return {
+    hand_detected: true,
+    height_ratio: heightRatio,
+    rotation_degrees: rotationDegrees,
+    center_x_ratio: centerX,
+    hand_clipped: handClipped,
+    brightness: 128,
+    blur_score: 100,
+    steady: state.handSeenMs > 300,
+  };
+}
+
+function evaluateBrowserGuidance(metrics) {
+  const target = SAMPLE_TARGETS[getCurrentPoseIndex()];
+  const failures = [];
+  const blockers = [];
+
+  if (!metrics.hand_detected) {
+    failures.push('hand');
+    blockers.push('hand');
+  } else {
+    if (metrics.hand_clipped) failures.push('clipping');
+    if (!(target.minHeight <= metrics.height_ratio && metrics.height_ratio <= target.maxHeight)) failures.push('size');
+    if (!(target.minRot <= metrics.rotation_degrees && metrics.rotation_degrees <= target.maxRot)) failures.push('rotation');
+    if (!(target.minCx <= metrics.center_x_ratio && metrics.center_x_ratio <= target.maxCx)) failures.push('position');
+    if (!metrics.steady) failures.push('steady');
+  }
+
+  return {
+    acceptable: blockers.length === 0 && failures.length <= 2,
+    failures,
+    blockers,
+    target: target.key,
+    label: target.label,
+  };
+}
+
+// ── Browser registration fallback ─────────────────────────────────
+function captureBrowserSample() {
+  if (state.capturedSamples.length >= REGISTRATION_TOTAL_CAPTURES) return;
+  if (!state.lastGuidance?.acceptable) {
+    setFeedback('Adjust hand position before capturing', 'error');
+    return;
+  }
+
+  const hand = getCurrentRegistrationHand();
+  let b64;
+  if (state.lastLandmarks && state.lastLandmarks.length > 0) {
+    const roi = extractClientROI(videoReg, state.lastLandmarks[0]);
+    b64 = roi.data;
+  } else {
+    b64 = captureFrame(videoReg);
+  }
+
+  triggerFlash('captureFlashReg');
+  state.capturedSamples.push({ data: b64, hand });
+  state.currentSampleIndex = state.capturedSamples.length;
+  const counts = getRegistrationCounts();
+  state.registrationCounts = counts;
+  setFeedback(`Captured ${hand} hand sample ${counts[hand]}/${REGISTRATION_CAPTURES_PER_HAND}.`, 'success');
+  updateRegistrationUI();
+}
+
+async function finalizeBrowserRegistration() {
+  const nim = userNim.value.trim();
   const name = userName.value.trim();
-  if (!name || state.capturedImages.length < 5) return;
+  const { left: leftCount, right: rightCount } = getRegistrationCounts();
+  if (!nim || !name || !(leftCount === REGISTRATION_CAPTURES_PER_HAND && rightCount === REGISTRATION_CAPTURES_PER_HAND)) return;
 
-  btnRegister.disabled = true;
   setFeedback('Registering…', '');
-
-  const allRoi = state.capturedImages.every((c) => c.isRoi);
-  // Average rotation angle across all captures (hand barely moves between shots)
-  const avgRotation = allRoi
-    ? state.capturedImages.reduce((s, c) => s + (c.rotationAngle || 0), 0) / state.capturedImages.length
-    : 0;
 
   try {
     const res = await fetch('/api/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        nim,
         name,
-        images: state.capturedImages.map((c) => c.data),
-        is_roi: allRoi,
-        rotation_angle: avgRotation,
+        images: state.capturedSamples.map((c) => c.data),
+        hands: state.capturedSamples.map((c) => c.hand),
+        is_roi: true,
       }),
     });
     const data = await res.json();
 
     if (!res.ok) {
-      const msg = data.detail || 'Registration failed';
-      setFeedback(msg + ' — samples cleared, please try again.', 'error');
-      // Auto-reset after a short pause so user can read the error
-      setTimeout(() => {
-        const savedName = userName.value;
-        resetRegistration();
-        userName.value = savedName;   // keep the name they typed
-        setFeedback('Ready — recapture all 5 samples.', '');
-      }, 2500);
-      return;
+      throw new Error(data.detail || 'Registration failed');
     }
-
     setFeedback(`✓ ${data.name} enrolled successfully`, 'success');
-    resetRegistration();
-    loadStats();
   } catch (err) {
-    setFeedback('Network error — samples cleared, please try again.', 'error');
-    setTimeout(() => {
-      const savedName = userName.value;
-      resetRegistration();
-      userName.value = savedName;
-      setFeedback('', '');
-    }, 2500);
-    console.error(err);
+    setFeedback(err.message + ' — please try again.', 'error');
+    throw err;
   }
-});
+}
+
+function updateRegistrationUI() {
+  const sample = getCurrentSamplePrompt();
+  const { left: leftCount, right: rightCount } = getRegistrationCounts();
+
+  const sampleTitle = $('regSampleTitle');
+  const sampleDesc = $('regSampleDesc');
+  const captureCounter = $('captureCounter');
+
+  if (sampleTitle) sampleTitle.textContent = sample.title;
+  if (sampleDesc) sampleDesc.textContent = sample.desc;
+  if (captureCounter) {
+    captureCounter.textContent = `Left ${leftCount}/${REGISTRATION_CAPTURES_PER_HAND} · Right ${rightCount}/${REGISTRATION_CAPTURES_PER_HAND}`;
+  }
+
+  document.querySelectorAll('#captureDots .dot').forEach((dot) => {
+    const hand = dot.dataset.hand;
+    const i = Number(dot.dataset.i || 0);
+    dot.classList.toggle('filled', i < (hand === 'left' ? leftCount : rightCount));
+  });
+
+  renderQualityList(state.lastGuidance);
+
+  const active = state.registrationActive;
+  const hasNim = userNim?.value?.trim()?.length > 0;
+  const hasName = userName?.value?.trim()?.length > 0;
+  if (btnStartRegistration) btnStartRegistration.disabled = active || !hasNim || !hasName;
+  if (btnCaptureSample) btnCaptureSample.disabled = !active || !(state.lastGuidance?.acceptable);
+  if (btnFinalizeRegistration) btnFinalizeRegistration.disabled = !active || !isRegistrationComplete();
+  if (btnCancelRegistration) btnCancelRegistration.disabled = !active;
+}
+
+function renderQualityList(guidance) {
+  const list = $('qualityList');
+  if (!list) return;
+
+  if (!state.registrationActive) {
+    list.innerHTML = '<li><span>Status</span><strong class="neutral">Enter NIM and name to start</strong></li>';
+    return;
+  }
+  if (!guidance) {
+    list.innerHTML = '<li><span>Status</span><strong class="bad">Waiting for hand</strong></li>';
+    return;
+  }
+  const failures = new Set(guidance.failures || []);
+  const blockers = new Set(guidance.blockers || []);
+  const rows = [
+    ['hand', 'Hand detected', 'Required'],
+    ['brightness', 'Lighting', 'Required'],
+    ['sharpness', 'Sharpness', 'Required'],
+    ['clipping', 'Full hand visible', 'Guide'],
+    ['size', 'Target size', 'Guide'],
+    ['rotation', 'Target rotation', 'Guide'],
+    ['position', 'Target position', 'Guide'],
+    ['steady', 'Steady frame', 'Guide'],
+  ];
+  list.innerHTML = rows.map(([key, label, type]) => {
+    const ok = !failures.has(key);
+    const blocking = blockers.has(key);
+    const status = ok ? 'OK' : (blocking ? 'Fix' : 'Adjust');
+    const cls = ok ? 'ok' : (blocking ? 'bad' : 'warn');
+    let detail = '';
+    if (key === 'sharpness' && guidance.metrics?.blur_score != null) {
+      detail = ` (${guidance.metrics.blur_score.toFixed(0)})`;
+    } else if (key === 'brightness' && guidance.metrics?.brightness != null) {
+      detail = ` (${guidance.metrics.brightness.toFixed(0)})`;
+    }
+    return `<li><span>${label}${detail} <em>${type}</em></span><strong class="${cls}">${status}</strong></li>`;
+  }).join('');
+}
 
 function resetRegistration() {
-  state.capturedImages = [];
-  state.handSeenMs = 0;
+  state.registrationActive = false;
+  state.capturedSamples = [];
+  state.registrationCounts = { left: 0, right: 0 };
+  state.currentSampleIndex = 0;
+  state.lastGuidance = null;
+  stopRegistrationStatusPolling();
+  userNim.value = '';
   userName.value = '';
-  $('captureCounter').textContent = '0 / 5';
-  document.querySelectorAll('.dot').forEach((d) => d.classList.remove('filled'));
-  $('registerHint').textContent = 'Enter a name, then hold your palm in front of the camera.';
-  btnRegister.disabled = true;
-  if (btnReset) btnReset.disabled = true;
-  $('autoscanRingReg').style.display = 'none';
+  updateRegistrationUI();
+  updateHandGuideOverlay(null);
 }
 
 function setFeedback(msg, type) {
   const el = $('registerFeedback');
+  if (!el) return;
   el.textContent = msg;
   el.className = `register-feedback ${type}`;
 }
+
+// Hand guide overlay
+function updateHandGuideOverlay(metrics) {
+  const overlay = $('handGuideOverlay');
+  const sizeRing = $('guideSizeRing');
+  const crossH = $('guideCrossH');
+  const crossV = $('guideCrossV');
+  const rotArc = $('guideRotationArc');
+  const palmGuide = $('palmGuideReg');
+  const metricsDisplay = $('guidanceMetrics');
+
+  // Early return if elements don't exist
+  if (!overlay || !sizeRing) return;
+
+  if (!metrics || !metrics.hand_detected) {
+    overlay.style.opacity = '0.3';
+    sizeRing.setAttribute('stroke', 'var(--text-muted)');
+    if (palmGuide) palmGuide.style.opacity = '1';
+    if (metricsDisplay) {
+      const metricSize = $('metricSize');
+      const metricRotation = $('metricRotation');
+      const metricPosition = $('metricPosition');
+      if (metricSize) metricSize.querySelector('strong').textContent = '--';
+      if (metricRotation) metricRotation.querySelector('strong').textContent = '--';
+      if (metricPosition) metricPosition.querySelector('strong').textContent = '--';
+    }
+    return;
+  }
+
+  overlay.style.opacity = '1';
+  if (palmGuide) palmGuide.style.opacity = '0';
+
+  const target = SAMPLE_TARGETS[Math.min(state.currentSampleIndex, SAMPLE_TARGETS.length - 1)];
+
+  // Size indicator
+  const sizeOk = target.minHeight <= metrics.height_ratio && metrics.height_ratio <= target.maxHeight;
+  const sizeColor = sizeOk ? 'var(--success)' : 'var(--warning)';
+  sizeRing.setAttribute('stroke', sizeColor);
+  const targetSize = (target.minHeight + target.maxHeight) / 2;
+  const sizeRadius = 20 + targetSize * 40;
+  sizeRing.setAttribute('r', sizeRadius.toFixed(1));
+
+  // Position indicator (crosshair)
+  if (crossH && crossV) {
+    const posOk = target.minCx <= metrics.center_x_ratio && metrics.center_x_ratio <= target.maxCx;
+    const posColor = posOk ? 'var(--success)' : 'var(--warning)';
+    const targetCx = (target.minCx + target.maxCx) / 2 * 100;
+    crossH.setAttribute('x1', (targetCx - 5).toFixed(1));
+    crossH.setAttribute('x2', (targetCx + 5).toFixed(1));
+    crossH.setAttribute('y1', '50');
+    crossH.setAttribute('y2', '50');
+    crossV.setAttribute('x1', targetCx.toFixed(1));
+    crossV.setAttribute('x2', targetCx.toFixed(1));
+    crossH.setAttribute('stroke', posColor);
+    crossV.setAttribute('stroke', posColor);
+  }
+
+  // Rotation indicator
+  if (rotArc) {
+    const rotOk = target.minRot <= metrics.rotation_degrees && metrics.rotation_degrees <= target.maxRot;
+    const rotColor = rotOk ? 'var(--success)' : 'var(--warning)';
+    const targetRot = (target.minRot + target.maxRot) / 2;
+    const arcRadius = 45;
+    const startAngle = (targetRot - 10) * Math.PI / 180;
+    const endAngle = (targetRot + 10) * Math.PI / 180;
+    const x1 = 50 + arcRadius * Math.cos(startAngle);
+    const y1 = 50 + arcRadius * Math.sin(startAngle);
+    const x2 = 50 + arcRadius * Math.cos(endAngle);
+    const y2 = 50 + arcRadius * Math.sin(endAngle);
+    rotArc.setAttribute('d', `M ${x1} ${y1} A ${arcRadius} ${arcRadius} 0 0 1 ${x2} ${y2}`);
+    rotArc.setAttribute('stroke', rotColor);
+  }
+
+  // Update metrics display
+  if (metricsDisplay) {
+    const sizeOk = target.minHeight <= metrics.height_ratio && metrics.height_ratio <= target.maxHeight;
+    const rotOk = target.minRot <= metrics.rotation_degrees && metrics.rotation_degrees <= target.maxRot;
+    const posOk = target.minCx <= metrics.center_x_ratio && metrics.center_x_ratio <= target.maxCx;
+    const sizePercent = (metrics.height_ratio * 100).toFixed(0);
+    const rotDeg = metrics.rotation_degrees.toFixed(1);
+    const posPercent = (metrics.center_x_ratio * 100).toFixed(0);
+    const metricSize = $('metricSize');
+    const metricRotation = $('metricRotation');
+    const metricPosition = $('metricPosition');
+    if (metricSize) {
+      metricSize.querySelector('strong').textContent = `${sizePercent}%`;
+      metricSize.querySelector('strong').className = sizeOk ? 'ok' : 'warn';
+    }
+    if (metricRotation) {
+      metricRotation.querySelector('strong').textContent = `${rotDeg}°`;
+      metricRotation.querySelector('strong').className = rotOk ? 'ok' : 'warn';
+    }
+    if (metricPosition) {
+      metricPosition.querySelector('strong').textContent = `${posPercent}%`;
+      metricPosition.querySelector('strong').className = posOk ? 'ok' : 'warn';
+    }
+  }
+}
+
+function syncStartRegistrationDisabled() {
+  const hasNim = userNim?.value?.trim()?.length > 0;
+  const hasName = userName?.value?.trim()?.length > 0;
+  if (btnStartRegistration) btnStartRegistration.disabled = state.registrationActive || !hasNim || !hasName;
+}
+
+userNim?.addEventListener('input', syncStartRegistrationDisabled);
+userName?.addEventListener('input', syncStartRegistrationDisabled);
 
 // ── Access Log ───────────────────────────────────────────────────
 // ── Access Log Pagination ─────────────────────────────────────────
 const LOG_PAGE_SIZE = 10;
 const logPagState = { page: 0, total: 0 };
 
-btnRefresh.addEventListener('click', () => {
+btnRefresh?.addEventListener('click', () => {
   logPagState.page = 0;
   loadLogs();
   loadUsers();
@@ -720,7 +1145,7 @@ function updateLogPagination() {
 function renderLogs(logs) {
   const tbody = $('logTableBody');
   if (!logs.length) {
-    tbody.innerHTML = `<tr class="log-empty-row"><td colspan="4"><div class="log-empty">
+    tbody.innerHTML = `<tr class="log-empty-row"><td colspan="6"><div class="log-empty">
       <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
         <path d="M8 12h24M8 20h16M8 28h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
       </svg><span>No access attempts recorded yet</span></div></td></tr>`;
@@ -734,6 +1159,8 @@ function renderLogs(logs) {
       <td>${esc(log.matched_name)}</td>
       <td><span class="log-status ${ok ? 'allowed' : 'denied'}">${ok ? 'Allowed' : 'Denied'}</span></td>
       <td>${log.similarity != null ? (log.similarity * 100).toFixed(1) + '%' : '—'}</td>
+      <td>${log.duration_ms != null ? log.duration_ms + ' ms' : '—'}</td>
+      <td>${log.description ? esc(log.description) : '—'}</td>
     </tr>`;
   }).join('');
 }
@@ -759,7 +1186,7 @@ function renderUsers(users) {
         <circle cx="7" cy="4.5" r="2.5" stroke="currentColor" stroke-width="1.2"/>
         <path d="M2 13c0-2.761 2.239-4 5-4s5 1.239 5 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
       </svg>
-      <span class="user-chip-name">${esc(u.name)}</span>
+      <span class="user-chip-name">${esc(u.nim)} — ${esc(u.name)}</span>
       <button class="user-chip-delete" onclick="window.deleteUser(${u.id})" title="Remove">×</button>
     </div>`).join('');
 }
@@ -778,13 +1205,64 @@ async function loadStats() {
   } catch (_) { /* silent */ }
 }
 
+async function loadStatus() {
+  try {
+    const data = await fetch('/api/status').then((r) => r.json());
+    const device = data.device || {};
+    state.usbDeviceMode = data.app?.camera_source === 'usb' && data.app?.device_runtime_enabled === true;
+    const workerState = device.worker_state ?? 'disabled';
+    const cameraConnected = !!device.camera_connected;
+
+    $('deviceWorkerState').textContent = workerState;
+    $('deviceCameraState').textContent = cameraConnected ? 'connected' : 'offline';
+    $('deviceFps').textContent = device.fps != null ? String(device.fps) : '—';
+    $('deviceLastRecognition').textContent = device.last_recognition_at ?? '—';
+
+    $('systemStatus').classList.toggle('offline', workerState !== 'running');
+    $('systemStatusLabel').textContent = workerState === 'running' ? 'Online' : 'Idle';
+  } catch (_) {
+    $('deviceWorkerState').textContent = 'unreachable';
+    $('deviceCameraState').textContent = 'offline';
+    $('deviceFps').textContent = '—';
+    $('deviceLastRecognition').textContent = '—';
+    $('systemStatus').classList.add('offline');
+    $('systemStatusLabel').textContent = 'Offline';
+  }
+}
+
 const esc = (s) =>
   String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
 // ── Init ─────────────────────────────────────────────────────────
 (async () => {
-  await startCamera();
-  loadStats();
-  video.addEventListener('loadeddata', () => initMediaPipe(), { once: true });
-  if (video.readyState >= 2) initMediaPipe();
+  try {
+    loadStats();
+    await loadStatus();
+    setInterval(loadStatus, 5000);
+
+    if (!state.usbDeviceMode) {
+      // Browser mode: use webcam for both scan and registration
+      await startCamera();
+      video.addEventListener('loadeddata', () => initMediaPipe(), { once: true });
+      if (video.readyState >= 2) initMediaPipe();
+      // Show browser video in registration, hide USB preview
+      if (videoReg) videoReg.style.display = 'block';
+      if (usbRegistrationPreview) usbRegistrationPreview.style.display = 'none';
+    } else {
+      // USB mode: use MJPEG stream for both scan and registration
+      startUsbPreview();
+      startUsbScanEvents();
+      setAutoMode(false);
+      // Show USB preview in registration, hide browser video
+      if (videoReg) videoReg.style.display = 'none';
+      if (usbRegistrationPreview) {
+        usbRegistrationPreview.style.display = 'block';
+      }
+    }
+
+    // Initialize registration UI
+    updateRegistrationUI();
+  } catch (err) {
+    console.error('[PalmAccess] Init error:', err);
+  }
 })();

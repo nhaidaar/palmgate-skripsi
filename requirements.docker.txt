@@ -4,5 +4,5 @@ mediapipe==0.10.*
 opencv-python-headless==4.11.*
 numpy>=1.26,<2.0
 python-multipart==0.0.*
-# Newer TFLite runtime is required for the bundled model
-tensorflow-cpu==2.21.*
+# Lightweight TensorFlow Lite runtime for Orange Pi / Linux SBC images
+tflite-runtime==2.14.*

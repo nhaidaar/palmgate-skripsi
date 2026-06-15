@@ -5,5 +5,16 @@ opencv-python-headless==4.11.*
 numpy>=1.26,<2.0
 python-multipart==0.0.*
 scikit-learn==1.6.*
-tensorflow==2.21.*
+tflite-runtime==2.14.* ; platform_system == "Linux"
+tensorflow==2.14.* ; platform_system != "Linux"
+ipykernel==6.* ; platform_system != "Linux"
+ipywidgets==8.* ; platform_system != "Linux"
+matplotlib==3.* ; platform_system != "Linux"
+pandas==2.* ; platform_system != "Linux"
+pillow==12.* ; platform_system != "Linux"
+rembg==2.* ; platform_system != "Linux"
+onnxruntime==1.* ; platform_system != "Linux"
+scikit-image==0.25.* ; platform_system != "Linux"
+tqdm==4.* ; platform_system != "Linux"
 pytest==8.*
+httpx==0.28.*

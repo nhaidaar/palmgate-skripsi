@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Install Python deps in a separate layer so rebuilds after code changes
-# don't reinstall the ~600 MB of ML packages.
+# don't reinstall the ML packages.
 COPY requirements.docker.txt .
 RUN pip install --no-cache-dir -r requirements.docker.txt
 
@@ -49,5 +49,6 @@ EXPOSE 8000
 # DB_PATH is overridden by docker-compose so the DB lands on the volume,
 # not inside the container's writable layer.
 ENV DB_PATH=/data/palmprint.db
+ENV ORT_LOG_SEVERITY_LEVEL=3
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

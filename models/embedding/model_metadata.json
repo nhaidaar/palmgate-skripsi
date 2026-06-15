@@ -1,0 +1,24 @@
+{
+  "embedding_dim": 128,
+  "img_size": [
+    224,
+    224
+  ],
+  "input_range": "0-255 float32",
+  "similarity": "cosine L2-norm",
+  "operating_threshold": 0.745932400226593,
+  "operating_far": 0.01,
+  "cv_eer_pooled": 0.04477441870186752,
+  "cv_eer_ci95": [
+    0.036840944856406585,
+    0.05503200628933365
+  ],
+  "cv_auc": 0.9871887191146387,
+  "tta_rotations": [
+    0.0,
+    -6.0,
+    6.0
+  ],
+  "split_by_hand_train": false,
+  "preprocessing": "MediaPipe ROI -> gray -> CLAHE(2.0,8x8) -> GRAY2RGB -> resize 224"
+}
