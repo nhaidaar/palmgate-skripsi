@@ -8,6 +8,7 @@ from mediapipe.tasks.python import vision as mp_vision
 from app.config import (
     CLAHE_CLIP_LIMIT,
     CLAHE_TILE_GRID,
+    DEFAULT_EMBEDDING_DIM,
     EMBEDDING_DIM,
     HAND_LANDMARKER_PATH,
     IMG_SIZE,
@@ -95,8 +96,8 @@ class PalmProcessor:
         shape = output_details[0].get("shape", [])
         if hasattr(shape, "tolist"):
             shape = shape.tolist()
-        if len(shape) != 2 or int(shape[-1]) <= 0:
-            raise RuntimeError(f"Embedding model must output [1, dim], got {shape}")
+        if len(shape) != 2 or int(shape[-1]) != DEFAULT_EMBEDDING_DIM:
+            raise RuntimeError(f"Embedding model must output [1, {DEFAULT_EMBEDDING_DIM}], got {shape}")
         self._embedding_dim = int(shape[-1])
         log.info("MODEL | embedding output index=%d dim=%d", self._output_index, self._embedding_dim)
 

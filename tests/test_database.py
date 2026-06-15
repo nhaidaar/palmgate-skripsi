@@ -68,6 +68,21 @@ def test_get_all_embeddings_returns_unknown_hand_for_legacy_user(db):
     assert embeddings[0]["hand"] == "unknown"
 
 
+def test_add_user_rejects_mismatched_embedding_hands_before_insert(db):
+    emb = np.ones(4, dtype=np.float32)
+
+    with pytest.raises(ValueError, match="embedding_hands"):
+        db.add_user(
+            "Alice",
+            emb,
+            nim="001",
+            individual_embeddings=[emb, emb],
+            embedding_hands=["left"],
+        )
+
+    assert db.get_all_users() == []
+
+
 def test_add_user_requires_nim(db):
     emb = np.ones(128, dtype=np.float32)
 

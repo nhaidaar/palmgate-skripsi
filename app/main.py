@@ -27,16 +27,23 @@ _BUILD_TS = str(int(time.time()))
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global db, palm_processor, device_runtime
-    db = Database(DB_PATH)
-    palm_processor = PalmProcessor(MODEL_PATH)
-    if DEVICE_RUNTIME_ENABLED and CAMERA_SOURCE == "usb":
-        device_runtime = build_device_runtime(palm_processor, db)
-        device_runtime.start()
-    yield
-    if device_runtime is not None:
-        device_runtime.stop()
-    palm_processor.close()
-    db.close()
+    try:
+        db = Database(DB_PATH)
+        palm_processor = PalmProcessor(MODEL_PATH)
+        if DEVICE_RUNTIME_ENABLED and CAMERA_SOURCE == "usb":
+            device_runtime = build_device_runtime(palm_processor, db)
+            device_runtime.start()
+        yield
+    finally:
+        if device_runtime is not None:
+            device_runtime.stop()
+            device_runtime = None
+        if palm_processor is not None:
+            palm_processor.close()
+            palm_processor = None
+        if db is not None:
+            db.close()
+            db = None
 
 
 app = FastAPI(title="Palmprint Recognition Preview", lifespan=lifespan)

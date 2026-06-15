@@ -98,27 +98,34 @@ class Database:
         if not clean_name:
             raise ValueError("Name is required")
 
+        individual_rows = []
+        if individual_embeddings:
+            hands = embedding_hands or ["unknown"] * len(individual_embeddings)
+            if len(hands) != len(individual_embeddings):
+                raise ValueError("embedding_hands must match individual_embeddings length")
+            individual_rows = [(e.astype(np.float32).tobytes(), hand) for e, hand in zip(individual_embeddings, hands)]
+
         try:
             cursor = self.conn.execute(
                 "INSERT INTO users (nim, name, embedding) VALUES (?, ?, ?)",
                 (clean_nim, clean_name, embedding.astype(np.float32).tobytes()),
             )
+            user_id = cursor.lastrowid
+            if individual_rows:
+                self.conn.executemany(
+                    "INSERT INTO user_embeddings (user_id, embedding, hand) VALUES (?, ?, ?)",
+                    [(user_id, blob, hand) for blob, hand in individual_rows],
+                )
+            self.conn.commit()
+            return user_id
         except sqlite3.IntegrityError as exc:
+            self.conn.rollback()
             if "users.nim" in str(exc) or "idx_users_nim" in str(exc) or "UNIQUE" in str(exc):
                 raise ValueError("NIM already exists") from exc
             raise
-
-        user_id = cursor.lastrowid
-        if individual_embeddings:
-            hands = embedding_hands or ["unknown"] * len(individual_embeddings)
-            if len(hands) != len(individual_embeddings):
-                raise ValueError("embedding_hands must match individual_embeddings length")
-            self.conn.executemany(
-                "INSERT INTO user_embeddings (user_id, embedding, hand) VALUES (?, ?, ?)",
-                [(user_id, e.astype(np.float32).tobytes(), hand) for e, hand in zip(individual_embeddings, hands)],
-            )
-        self.conn.commit()
-        return user_id
+        except Exception:
+            self.conn.rollback()
+            raise
 
     def get_all_users(self) -> list:
         rows = self.conn.execute(
