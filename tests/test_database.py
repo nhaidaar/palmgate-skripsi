@@ -83,6 +83,21 @@ def test_add_user_rejects_mismatched_embedding_hands_before_insert(db):
     assert db.get_all_users() == []
 
 
+def test_add_user_rejects_empty_embedding_hands_before_insert(db):
+    emb = np.ones(4, dtype=np.float32)
+
+    with pytest.raises(ValueError, match="embedding_hands"):
+        db.add_user(
+            "Alice",
+            emb,
+            nim="001",
+            individual_embeddings=[emb],
+            embedding_hands=[],
+        )
+
+    assert db.get_all_users() == []
+
+
 def test_add_user_requires_nim(db):
     emb = np.ones(128, dtype=np.float32)
 

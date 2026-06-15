@@ -100,7 +100,7 @@ class Database:
 
         individual_rows = []
         if individual_embeddings:
-            hands = embedding_hands or ["unknown"] * len(individual_embeddings)
+            hands = ["unknown"] * len(individual_embeddings) if embedding_hands is None else embedding_hands
             if len(hands) != len(individual_embeddings):
                 raise ValueError("embedding_hands must match individual_embeddings length")
             individual_rows = [(e.astype(np.float32).tobytes(), hand) for e, hand in zip(individual_embeddings, hands)]
