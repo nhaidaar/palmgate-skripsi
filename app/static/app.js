@@ -725,7 +725,7 @@ async function apiStartRegistration(nim, name) {
   const res = await fetch('/api/device-registration/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nim: userNim.value.trim(), name }),
+    body: JSON.stringify({ nim, name }),
   });
   return await res.json();
 }
