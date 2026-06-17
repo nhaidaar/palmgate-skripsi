@@ -7,9 +7,8 @@ x-palmgate-common: &palmgate-common
     - "8000"
 
   volumes:
-    # ML model files — copy these to the Orange Pi once (they are gitignored):
-    #   scp -r models/embedding hand_landmarker.task orangepi:/opt/palmgate/
-    - ./models/embedding:/app/models/embedding:ro
+    # ML model files live under the project models/ directory.
+    - ${PALMGATE_MODELS_DIR:-./models}/${MODEL_VERSION:-embedding_new_roi_v2}:/app/models/${MODEL_VERSION:-embedding_new_roi_v2}:ro
     - ./hand_landmarker.task:/app/hand_landmarker.task:ro
     # Persistent storage for the SQLite database
     - palmgate-db:/data
@@ -33,6 +32,7 @@ services:
     environment:
       # Database is stored in the named volume below so it survives rebuilds.
       - DB_PATH=/data/palmprint.db
+      - MODEL_VERSION=${MODEL_VERSION:-embedding_new_roi_v2}
       # Browser mode: use a phone/laptop camera through the web UI.
       - DEVICE_RUNTIME_ENABLED=0
       - CAMERA_SOURCE=browser
@@ -43,6 +43,7 @@ services:
     environment:
       # Database is stored in the named volume below so it survives rebuilds.
       - DB_PATH=/data/palmprint.db
+      - MODEL_VERSION=${MODEL_VERSION:-embedding_new_roi_v2}
       # USB mode: use the Orange Pi USB camera for registration and recognition.
       - DEVICE_RUNTIME_ENABLED=1
       - CAMERA_SOURCE=usb

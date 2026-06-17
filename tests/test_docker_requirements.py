@@ -24,6 +24,7 @@ def test_env_example_selects_usb_compose_profile_by_default():
     assert "DEVICE_RUNTIME_ENABLED=1" in env_example
     assert "CAMERA_SOURCE=usb" in env_example
     assert "PALMGATE_CAMERA_DEVICE=/dev/video0" in env_example
+    assert "PALMGATE_MODELS_DIR=./models" in env_example
 
 
 def test_readme_documents_default_usb_compose_start():
@@ -50,9 +51,11 @@ def test_usb_compose_uses_separate_preview_and_processing_intervals():
     assert "DEVICE_FRAME_INTERVAL_MS=1000" not in compose
 
 
-def test_compose_mounts_embedding_model_directory():
+def test_compose_mounts_selected_model_version_from_project_models():
     compose = Path("docker-compose.yml").read_text()
 
-    assert "./models/embedding:/app/models/embedding:ro" in compose
+    assert "${PALMGATE_MODELS_DIR:-./models}/${MODEL_VERSION:-embedding_new_roi_v2}:/app/models/${MODEL_VERSION:-embedding_new_roi_v2}:ro" in compose
+    assert "MODEL_VERSION=${MODEL_VERSION:-embedding_new_roi_v2}" in compose
+    assert "./models/embedding:/app/models/embedding:ro" not in compose
     assert "./palm_embedding.tflite:/app/palm_embedding.tflite" not in compose
     assert "palm_recognition.tflite:/app/palm_recognition.tflite" not in compose
