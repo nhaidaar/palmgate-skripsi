@@ -35,6 +35,15 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
 Open: [http://127.0.0.1:8000](http://127.0.0.1:8000)
 
+## Run with Docker
+
+Docker Compose reads `.env`, not `.env.example`. The example defaults to the USB profile:
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
 ## Current features
 
 - **Scan Palm** — browser-camera recognition with ALLOWED / DENIED result

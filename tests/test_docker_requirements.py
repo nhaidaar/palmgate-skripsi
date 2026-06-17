@@ -17,6 +17,22 @@ def test_compose_does_not_configure_old_notebook_rembg_path():
     assert "NOTEBOOK_REMBG" not in compose
 
 
+def test_env_example_selects_usb_compose_profile_by_default():
+    env_example = Path(".env.example").read_text()
+
+    assert "COMPOSE_PROFILES=usb" in env_example
+    assert "DEVICE_RUNTIME_ENABLED=1" in env_example
+    assert "CAMERA_SOURCE=usb" in env_example
+    assert "PALMGATE_CAMERA_DEVICE=/dev/video0" in env_example
+
+
+def test_readme_documents_default_usb_compose_start():
+    readme = Path("README.md").read_text()
+
+    assert "cp .env.example .env" in readme
+    assert "docker compose up --build" in readme
+
+
 def test_usb_compose_uses_configurable_camera_device_path():
     compose = Path("docker-compose.yml").read_text()
 
