@@ -128,12 +128,17 @@ def test_upload_registration_sends_full_photo_payload():
     assert "is_roi: false" in source
 
 
-def test_browser_roi_is_not_rotated_twice():
+def test_browser_camera_sends_full_frames_for_server_roi():
     source = Path("app/static/app.js").read_text()
-    roi_block = source[source.index("function extractClientROI") : source.index("Ring progress")]
+    scan_block = source[source.index("async function triggerScan") : source.index("function showScanning")]
+    capture_block = source[source.index("function captureBrowserSample") : source.index("async function finalizeBrowserRegistration")]
+    finalize_block = source[source.index("async function finalizeBrowserRegistration") : source.index("function updateRegistrationUI")]
 
-    assert "rotationAngle" not in roi_block
-    assert "return { data: roiCanvas.toDataURL('image/jpeg', 0.9) };" in roi_block
+    assert "extractClientROI" not in source
+    assert "b64 = captureFrame(video);" in scan_block
+    assert "body: JSON.stringify({ image: b64, is_roi: false })" in scan_block
+    assert "b64 = captureFrame(videoReg);" in capture_block
+    assert "is_roi: false" in finalize_block
 
 
 def test_frontend_displays_nim_with_user_name():

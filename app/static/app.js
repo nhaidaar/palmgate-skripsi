@@ -1,6 +1,6 @@
 /* ================================================================
    Palm Access — Biometric identification
-   Browser-side: MediaPipe hand detection + client ROI crop
+   Browser-side: MediaPipe hand detection + server ROI preprocessing
 ================================================================ */
 
 // MediaPipe imports - loaded dynamically to avoid blocking if CDN fails
@@ -269,74 +269,6 @@ function updateBrightnessBadge(videoEl, landmarks, badgeId) {
   badge.style.display = 'block';
 }
 
-// ── Client-side ROI extraction ───────────────────────────────────
-// Mirrors the server's extract_palm_roi() logic, using landmarks already
-// computed by the browser's MediaPipe instance. Sends a small JPEG crop
-// instead of a full-resolution PNG, eliminating server-side detection.
-//
-// Mirrors server-side PalmProcessor.extract_palm_roi(): rotate around the
-// wrist/middle-MCP palm center, then crop from the aligned palm ROI.
-//
-// Returns { data: base64string }; ROI is already aligned.
-function extractClientROI(videoEl, landmarks) {
-  const w = videoEl.videoWidth  || 640;
-  const h = videoEl.videoHeight || 480;
-
-  const wrist     = landmarks[WRIST];
-  const indexMcp  = landmarks[INDEX_MCP];
-  const middleMcp = landmarks[MIDDLE_MCP];
-  const pinkyMcp  = landmarks[PINKY_MCP];
-
-  const dx = (pinkyMcp.x - indexMcp.x) * w;
-  const dy = (pinkyMcp.y - indexMcp.y) * h;
-  const angleDeg = Math.atan2(dy, dx) * (180 / Math.PI);
-
-  const centerCx = (wrist.x + middleMcp.x) / 2 * w;
-  const centerCy = (wrist.y + middleMcp.y) / 2 * h;
-  const rad = angleDeg * (Math.PI / 180);
-  const cosA = Math.cos(rad);
-  const sinA = Math.sin(rad);
-
-  function rotPt(px, py) {
-    const rx = cosA * (px - centerCx) + sinA * (py - centerCy) + centerCx;
-    const ry = -sinA * (px - centerCx) + cosA * (py - centerCy) + centerCy;
-    return [rx, ry];
-  }
-
-  const [centerRx, centerRy] = rotPt(centerCx, centerCy);
-  const [idxRx] = rotPt(indexMcp.x * w, indexMcp.y * h);
-  const [pnkRx] = rotPt(pinkyMcp.x * w, pinkyMcp.y * h);
-
-  const cx = Math.round(centerRx);
-  const cy = Math.round(centerRy);
-  const palmWidth = Math.abs(Math.round(idxRx - pnkRx));
-  const roiSize = Math.max(Math.round(palmWidth * 1.5), 60);
-  const half = Math.round(roiSize / 2);
-
-  const x1 = Math.max(0, cx - half);
-  const y1 = Math.max(0, cy - half);
-  const cropW = Math.min(w, cx + half) - x1;
-  const cropH = Math.min(h, cy + half) - y1;
-
-  // Draw the rotated video frame into an intermediate canvas, then crop
-  const rotCanvas = document.createElement('canvas');
-  rotCanvas.width  = w;
-  rotCanvas.height = h;
-  const rctx = rotCanvas.getContext('2d');
-  rctx.save();
-  rctx.translate(centerCx, centerCy);
-  rctx.rotate(-rad);
-  rctx.translate(-centerCx, -centerCy);
-  rctx.drawImage(videoEl, 0, 0, w, h);
-  rctx.restore();
-
-  const roiCanvas = document.createElement('canvas');
-  roiCanvas.width  = cropW;
-  roiCanvas.height = cropH;
-  roiCanvas.getContext('2d').drawImage(rotCanvas, x1, y1, cropW, cropH, 0, 0, cropW, cropH);
-
-  return { data: roiCanvas.toDataURL('image/jpeg', 0.9) };
-}
 
 // ── Ring progress ────────────────────────────────────────────────
 function updateRingProgress() {
@@ -536,15 +468,7 @@ async function triggerScan() {
   triggerFlash('captureFlash');
   showScanning();
 
-  // Use client-side ROI extraction if landmarks available (matches registration pipeline)
-  let b64, isRoi = false;
-  if (state.lastLandmarks && state.lastLandmarks.length > 0) {
-    const roi = extractClientROI(video, state.lastLandmarks[0]);
-    b64 = roi.data;
-    isRoi = true;
-  } else {
-    b64 = captureFrame(video);
-  }
+  const b64 = captureFrame(video);
 
   const scanStart = performance.now();
 
@@ -552,7 +476,7 @@ async function triggerScan() {
     const res = await fetch('/api/recognize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: b64, is_roi: isRoi }),
+      body: JSON.stringify({ image: b64, is_roi: false }),
     });
     const elapsed = Math.round(performance.now() - scanStart);
 
@@ -867,13 +791,7 @@ function captureBrowserSample() {
   }
 
   const hand = getCurrentRegistrationHand();
-  let b64;
-  if (state.lastLandmarks && state.lastLandmarks.length > 0) {
-    const roi = extractClientROI(videoReg, state.lastLandmarks[0]);
-    b64 = roi.data;
-  } else {
-    b64 = captureFrame(videoReg);
-  }
+  const b64 = captureFrame(videoReg);
 
   triggerFlash('captureFlashReg');
   state.capturedSamples.push({ data: b64, hand });
@@ -901,7 +819,7 @@ async function finalizeBrowserRegistration() {
         name,
         images: state.capturedSamples.map((c) => c.data),
         hands: state.capturedSamples.map((c) => c.hand),
-        is_roi: true,
+        is_roi: false,
       }),
     });
     const data = await res.json();
