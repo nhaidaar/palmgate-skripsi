@@ -74,8 +74,28 @@ def test_dotenv_loader_sets_missing_env_without_overriding(tmp_path, monkeypatch
     assert os.environ["MODEL_PATH"] == "/already-set.tflite"
 
 
-def test_env_example_documents_default_model_version():
-    env_example = (Path(".env.example")).read_text()
+def test_dotenv_loader_ignores_read_errors(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("MODEL_VERSION=from_file\n", encoding="utf-8")
+
+    import app.config as config
+
+    original_read_text = Path.read_text
+
+    def read_text(path, *args, **kwargs):
+        if path == env_file:
+            raise OSError("permission denied")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+
+    config._load_env_file(env_file)
+
+
+def test_env_example_documents_default_model_version(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    project_root = Path(__file__).resolve().parent.parent
+    env_example = (project_root / ".env.example").read_text()
 
     assert "MODEL_VERSION=embedding_new_roi_v2" in env_example
     assert "MODEL_PATH=" in env_example

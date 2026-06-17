@@ -96,12 +96,16 @@ def test_registration_ui_has_camera_upload_mode_tabs():
     html = Path("app/static/index.html").read_text()
 
     assert "id=\"registrationModeTabs\"" in html
+    assert "id=\"cameraRegistrationTab\"" in html
+    assert "id=\"uploadRegistrationTab\"" in html
     assert "data-registration-mode=\"camera\"" in html
     assert "data-registration-mode=\"upload\"" in html
     assert "Camera capture" in html
     assert "Upload images" in html
     assert "id=\"cameraRegistrationPanel\"" in html
+    assert "aria-labelledby=\"cameraRegistrationTab\"" in html
     assert "id=\"uploadRegistrationPanel\"" in html
+    assert "aria-labelledby=\"uploadRegistrationTab\"" in html
 
 
 def test_upload_registration_has_separate_left_right_pickers():
@@ -126,6 +130,20 @@ def test_upload_registration_sends_full_photo_payload():
     assert "images: [...leftImages, ...rightImages]" in source
     assert "hands: [...Array(REGISTRATION_CAPTURES_PER_HAND).fill('left'), ...Array(REGISTRATION_CAPTURES_PER_HAND).fill('right')]" in source
     assert "is_roi: false" in source
+
+
+def test_upload_busy_disables_registration_controls():
+    source = Path("app/static/app.js").read_text()
+    mode_block = source[source.index("function setRegistrationMode") : source.index("function uploadFiles")]
+    ui_block = source[source.index("function updateRegistrationUI") : source.index("function renderQualityList")]
+
+    assert "if (state.registrationActive || state.uploadBusy) return;" in mode_block
+    assert "const busy = state.uploadBusy;" in ui_block
+    assert "tab.disabled = active || busy;" in ui_block
+    assert "btnStartRegistration.disabled = active || busy || !hasNim || !hasName" in ui_block
+    assert "btnCaptureSample.disabled = !active || busy || !(state.lastGuidance?.acceptable)" in ui_block
+    assert "btnFinalizeRegistration.disabled = !active || busy || !isRegistrationComplete()" in ui_block
+    assert "btnCancelRegistration.disabled = !active || busy" in ui_block
 
 
 def test_browser_camera_sends_full_frames_for_server_roi():

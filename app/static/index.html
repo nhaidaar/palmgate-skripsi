@@ -289,6 +289,7 @@
             <div class="registration-mode-tabs" id="registrationModeTabs" role="tablist" aria-label="Registration method">
               <button
                 class="registration-mode-tab active"
+                id="cameraRegistrationTab"
                 type="button"
                 role="tab"
                 aria-selected="true"
@@ -300,6 +301,7 @@
               </button>
               <button
                 class="registration-mode-tab"
+                id="uploadRegistrationTab"
                 type="button"
                 role="tab"
                 aria-selected="false"
@@ -311,7 +313,7 @@
               </button>
             </div>
 
-            <div class="registration-mode-panel active" id="cameraRegistrationPanel" data-registration-mode-panel="camera" role="tabpanel">
+            <div class="registration-mode-panel active" id="cameraRegistrationPanel" data-registration-mode-panel="camera" role="tabpanel" aria-labelledby="cameraRegistrationTab">
               <div class="registration-status" id="registrationStatus">
                 <div class="sample-title" id="regSampleTitle">Left hand sample 1/5: Center palm</div>
                 <div class="sample-desc" id="regSampleDesc">Use your actual left hand: palm facing camera, fingers up, wrist visible.</div>
@@ -351,7 +353,7 @@
               </div>
             </div>
 
-            <div class="registration-mode-panel" id="uploadRegistrationPanel" data-registration-mode-panel="upload" role="tabpanel" hidden>
+            <div class="registration-mode-panel" id="uploadRegistrationPanel" data-registration-mode-panel="upload" role="tabpanel" aria-labelledby="uploadRegistrationTab" hidden>
               <div class="upload-registration-grid">
                 <div class="upload-picker" id="uploadLeftPicker">
                   <div class="upload-picker-head">

@@ -856,18 +856,19 @@ function updateRegistrationUI() {
 
   renderQualityList(state.lastGuidance);
 
+  const active = state.registrationActive;
+  const busy = state.uploadBusy;
   registrationModeTabs.forEach((tab) => {
-    tab.disabled = state.registrationActive;
+    tab.disabled = active || busy;
   });
   updateUploadRegistrationUI();
 
-  const active = state.registrationActive;
   const hasNim = userNim?.value?.trim()?.length > 0;
   const hasName = userName?.value?.trim()?.length > 0;
-  if (btnStartRegistration) btnStartRegistration.disabled = active || !hasNim || !hasName;
-  if (btnCaptureSample) btnCaptureSample.disabled = !active || !(state.lastGuidance?.acceptable);
-  if (btnFinalizeRegistration) btnFinalizeRegistration.disabled = !active || !isRegistrationComplete();
-  if (btnCancelRegistration) btnCancelRegistration.disabled = !active;
+  if (btnStartRegistration) btnStartRegistration.disabled = active || busy || !hasNim || !hasName;
+  if (btnCaptureSample) btnCaptureSample.disabled = !active || busy || !(state.lastGuidance?.acceptable);
+  if (btnFinalizeRegistration) btnFinalizeRegistration.disabled = !active || busy || !isRegistrationComplete();
+  if (btnCancelRegistration) btnCancelRegistration.disabled = !active || busy;
 }
 
 function renderQualityList(guidance) {
@@ -911,7 +912,7 @@ function renderQualityList(guidance) {
 
 function setRegistrationMode(mode) {
   if (!['camera', 'upload'].includes(mode)) return;
-  if (state.registrationActive) return;
+  if (state.registrationActive || state.uploadBusy) return;
   state.registrationMode = mode;
 
   registrationModeTabs.forEach((tab) => {
@@ -1162,7 +1163,7 @@ function updateHandGuideOverlay(metrics) {
 function syncStartRegistrationDisabled() {
   const hasNim = userNim?.value?.trim()?.length > 0;
   const hasName = userName?.value?.trim()?.length > 0;
-  if (btnStartRegistration) btnStartRegistration.disabled = state.registrationActive || !hasNim || !hasName;
+  if (btnStartRegistration) btnStartRegistration.disabled = state.registrationActive || state.uploadBusy || !hasNim || !hasName;
   updateUploadRegistrationUI();
 }
 

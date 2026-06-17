@@ -62,7 +62,7 @@ USB registration captures 5 samples per hand, stores one normalized template per
 | `DB_PATH` | `palmprint.db` | SQLite database location |
 | `MODEL_VERSION` | `embedding_new_roi_v2` | Use `models/<version>/model.tflite` and `models/<version>/model_metadata.json` |
 | `MODEL_PATH` | `models/<MODEL_VERSION>/model.tflite` | Explicit model path; overrides `MODEL_VERSION` |
-| `MODEL_METADATA_PATH` | model dir `model_metadata.json` | Explicit metadata path |
+| `MODEL_METADATA_PATH` | `models/<MODEL_VERSION>/model_metadata.json` | Explicit metadata path; defaults to `models/<MODEL_VERSION>/model_metadata.json` |
 | `NOTEBOOK_REMBG_ENABLED` | `1` | Legacy notebook preprocessing only; inactive runtime path |
 
 ## Required Model Files

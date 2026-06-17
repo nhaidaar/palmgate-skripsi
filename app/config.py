@@ -1,6 +1,9 @@
 import json
+import logging
 import os
 from pathlib import Path
+
+log = logging.getLogger("palmgate.config")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -8,7 +11,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 def _load_env_file(path: Path) -> None:
     if not path.exists():
         return
-    for line in path.read_text(encoding="utf-8").splitlines():
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        log.warning("Could not read env file %s: %s", path, exc)
+        return
+    for line in lines:
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
