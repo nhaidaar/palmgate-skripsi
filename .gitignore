@@ -58,6 +58,8 @@ desktop.ini
 !.env.example
 
 # Unnecessary / local things
+.superpowers/
 docs/
+designs/
 Dataset*/
 seeds/
