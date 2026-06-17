@@ -92,12 +92,71 @@ def test_registration_ui_requires_and_sends_nim():
     assert "hasNim" in source
 
 
-def test_browser_roi_is_not_rotated_twice():
-    source = Path("app/static/app.js").read_text()
-    roi_block = source[source.index("function extractClientROI") : source.index("Ring progress")]
+def test_registration_ui_has_camera_upload_mode_tabs():
+    html = Path("app/static/index.html").read_text()
 
-    assert "rotationAngle" not in roi_block
-    assert "return { data: roiCanvas.toDataURL('image/jpeg', 0.9) };" in roi_block
+    assert "id=\"registrationModeTabs\"" in html
+    assert "id=\"cameraRegistrationTab\"" in html
+    assert "id=\"uploadRegistrationTab\"" in html
+    assert "data-registration-mode=\"camera\"" in html
+    assert "data-registration-mode=\"upload\"" in html
+    assert "Camera capture" in html
+    assert "Upload images" in html
+    assert "id=\"cameraRegistrationPanel\"" in html
+    assert "aria-labelledby=\"cameraRegistrationTab\"" in html
+    assert "id=\"uploadRegistrationPanel\"" in html
+    assert "aria-labelledby=\"uploadRegistrationTab\"" in html
+
+
+def test_upload_registration_has_separate_left_right_pickers():
+    html = Path("app/static/index.html").read_text()
+
+    assert "id=\"uploadLeftFiles\"" in html
+    assert "id=\"uploadRightFiles\"" in html
+    assert "Left hand photos" in html
+    assert "Right hand photos" in html
+    assert "Select exactly 5 full-hand photos" in html
+    assert "id=\"btnUploadRegister\"" in html
+    assert "id=\"btnClearUploadFiles\"" in html
+
+
+def test_upload_registration_sends_full_photo_payload():
+    source = Path("app/static/app.js").read_text()
+
+    assert "async function finalizeUploadRegistration()" in source
+    assert "function fileToDataUrl(file)" in source
+    assert "uploadLeftFiles.files.length === REGISTRATION_CAPTURES_PER_HAND" in source
+    assert "uploadRightFiles.files.length === REGISTRATION_CAPTURES_PER_HAND" in source
+    assert "images: [...leftImages, ...rightImages]" in source
+    assert "hands: [...Array(REGISTRATION_CAPTURES_PER_HAND).fill('left'), ...Array(REGISTRATION_CAPTURES_PER_HAND).fill('right')]" in source
+    assert "is_roi: false" in source
+
+
+def test_upload_busy_disables_registration_controls():
+    source = Path("app/static/app.js").read_text()
+    mode_block = source[source.index("function setRegistrationMode") : source.index("function uploadFiles")]
+    ui_block = source[source.index("function updateRegistrationUI") : source.index("function renderQualityList")]
+
+    assert "if (state.registrationActive || state.uploadBusy) return;" in mode_block
+    assert "const busy = state.uploadBusy;" in ui_block
+    assert "tab.disabled = active || busy;" in ui_block
+    assert "btnStartRegistration.disabled = active || busy || !hasNim || !hasName" in ui_block
+    assert "btnCaptureSample.disabled = !active || busy || !(state.lastGuidance?.acceptable)" in ui_block
+    assert "btnFinalizeRegistration.disabled = !active || busy || !isRegistrationComplete()" in ui_block
+    assert "btnCancelRegistration.disabled = !active || busy" in ui_block
+
+
+def test_browser_camera_sends_full_frames_for_server_roi():
+    source = Path("app/static/app.js").read_text()
+    scan_block = source[source.index("async function triggerScan") : source.index("function showScanning")]
+    capture_block = source[source.index("function captureBrowserSample") : source.index("async function finalizeBrowserRegistration")]
+    finalize_block = source[source.index("async function finalizeBrowserRegistration") : source.index("function updateRegistrationUI")]
+
+    assert "extractClientROI" not in source
+    assert "b64 = captureFrame(video);" in scan_block
+    assert "body: JSON.stringify({ image: b64, is_roi: false })" in scan_block
+    assert "b64 = captureFrame(videoReg);" in capture_block
+    assert "is_roi: false" in finalize_block
 
 
 def test_frontend_displays_nim_with_user_name():

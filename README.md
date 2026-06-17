@@ -7,8 +7,8 @@ Web-based palmprint recognition app that now supports two operating modes:
 ## Requirements
 
 - Python 3.10+
-- `models/embedding/palm_embedding.tflite`
-- `models/embedding/model_metadata.json` if available
+- `models/embedding_new_roi_v2/model.tflite` by default, or set `MODEL_VERSION=<version>` for `models/<version>/model.tflite`
+- `model_metadata.json` next to the selected model if available
 - `hand_landmarker.task` in the project root
 
 ## Setup
@@ -38,7 +38,7 @@ Open: [http://127.0.0.1:8000](http://127.0.0.1:8000)
 ## Current features
 
 - **Scan Palm** — browser-camera recognition with ALLOWED / DENIED result
-- **Register** — USB-camera registration that captures 5 left-hand and 5 right-hand samples and stores per-hand templates
+- **Register** — camera or upload registration that captures 5 left-hand and 5 right-hand samples and stores per-hand templates
 - **Access Log** — timestamped history of recognition attempts
 - **Device Status** — shows worker state, camera state, FPS, registration state, and last recognition
 - **USB Runtime** — optional always-on worker for Orange Pi with a USB camera
@@ -210,7 +210,7 @@ journalctl -u palmgate-device -f
 
 1. Frames use MediaPipe hand landmarks to crop the palm ROI.
 2. The ROI is converted to grayscale, enhanced with CLAHE, converted back to RGB, resized to `224×224`, and kept as `0–255` float32 input.
-3. `palm_embedding.tflite` outputs a 128-d L2-normalized embedding directly.
+3. The selected `model.tflite` outputs a 128-d L2-normalized embedding directly.
 4. Cosine similarity compares the query embedding against stored per-hand templates.
 5. Result is recorded as `ALLOWED` or `DENIED`.
 

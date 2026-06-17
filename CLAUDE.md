@@ -60,13 +60,17 @@ USB registration captures 5 samples per hand, stores one normalized template per
 | `CAMERA_DEVICE_INDEX` | `0` | USB camera index |
 | `CAMERA_DEVICE_PATH` | - | Override camera path (e.g., `/dev/video0`) |
 | `DB_PATH` | `palmprint.db` | SQLite database location |
+| `MODEL_VERSION` | `embedding_new_roi_v2` | Use `models/<version>/model.tflite` and `models/<version>/model_metadata.json` |
+| `MODEL_PATH` | `models/<MODEL_VERSION>/model.tflite` | Explicit model path; overrides `MODEL_VERSION` |
+| `MODEL_METADATA_PATH` | `models/<MODEL_VERSION>/model_metadata.json` | Explicit metadata path; defaults to `models/<MODEL_VERSION>/model_metadata.json` |
 | `NOTEBOOK_REMBG_ENABLED` | `1` | Legacy notebook preprocessing only; inactive runtime path |
 
 ## Required Model Files
 
-Place model files at:
-- `models/embedding/palm_embedding.tflite` - EfficientNetB0 128-d embedding model
-- `models/embedding/model_metadata.json` - optional threshold/metadata file
+Place model files at either:
+- default versioned path: `models/embedding_new_roi_v2/model.tflite`
+- custom versioned path with `MODEL_VERSION=<version>`: `models/<version>/model.tflite`
+- optional metadata: `models/<version>/model_metadata.json` or `MODEL_METADATA_PATH`
 - `hand_landmarker.task` in project root - MediaPipe hand detection model
 
 ## Database Migration

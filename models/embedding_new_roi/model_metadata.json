@@ -1,0 +1,24 @@
+{
+  "embedding_dim": 128,
+  "img_size": [
+    224,
+    224
+  ],
+  "input_range": "0-255 float32 (preprocess_input EfficientNet di dalam model)",
+  "similarity": "cosine L2-norm",
+  "operating_threshold": 0.9143167734146118,
+  "operating_far": 0.01,
+  "cv_eer_pooled": 0.049981930302208946,
+  "cv_eer_ci95": [
+    0.04224938070830517,
+    0.06150203688645624
+  ],
+  "cv_auc": 0.9844110649479776,
+  "tta_rotations": [
+    0.0,
+    -6.0,
+    6.0
+  ],
+  "split_by_hand_train": false,
+  "preprocessing": "MediaPipe ROI -> gray -> CLAHE(2.0,8x8) -> GRAY2RGB -> resize 224"
+}

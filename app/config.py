@@ -1,18 +1,49 @@
 import json
+import logging
 import os
 from pathlib import Path
 
+log = logging.getLogger("palmgate.config")
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+def _load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        log.warning("Could not read env file %s: %s", path, exc)
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key and key not in os.environ:
+            os.environ[key] = value.strip().strip('"').strip("'")
+
+
+_load_env_file(BASE_DIR / ".env")
+
+DEFAULT_MODEL_VERSION = "embedding_new_roi_v2"
 DEFAULT_MODEL_DIR = BASE_DIR / "models" / "embedding"
 DEFAULT_MODEL_FILENAME = "palm_embedding.tflite"
+VERSIONED_MODEL_FILENAME = "model.tflite"
 DEFAULT_MODEL_METADATA_FILENAME = "model_metadata.json"
 DEFAULT_SIMILARITY_THRESHOLD = 0.745932400226593
 DEFAULT_EMBEDDING_DIM = 128
 DEFAULT_TTA_ROTATIONS = (0.0, -6.0, 6.0)
 
-MODEL_PATH = Path(os.getenv("MODEL_PATH", str(DEFAULT_MODEL_DIR / DEFAULT_MODEL_FILENAME)))
-MODEL_METADATA_PATH = Path(os.getenv("MODEL_METADATA_PATH", str(DEFAULT_MODEL_DIR / DEFAULT_MODEL_METADATA_FILENAME)))
+MODEL_VERSION = os.getenv("MODEL_VERSION", DEFAULT_MODEL_VERSION).strip()
+MODEL_DIR = BASE_DIR / "models" / MODEL_VERSION if MODEL_VERSION else DEFAULT_MODEL_DIR
+MODEL_PATH = Path(os.getenv(
+    "MODEL_PATH",
+    str(MODEL_DIR / (VERSIONED_MODEL_FILENAME if MODEL_VERSION else DEFAULT_MODEL_FILENAME)),
+))
+MODEL_METADATA_PATH = Path(os.getenv("MODEL_METADATA_PATH", str(MODEL_DIR / DEFAULT_MODEL_METADATA_FILENAME)))
 HAND_LANDMARKER_PATH = BASE_DIR / "hand_landmarker.task"
 
 

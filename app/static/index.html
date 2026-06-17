@@ -286,42 +286,108 @@
               />
             </div>
 
-            <div class="registration-status" id="registrationStatus">
-              <div class="sample-title" id="regSampleTitle">Left hand sample 1/5: Center palm</div>
-              <div class="sample-desc" id="regSampleDesc">Use your actual left hand: palm facing camera, fingers up, wrist visible.</div>
-              <div class="capture-counter-inline">Samples captured: <strong id="captureCounter">Left 0/5 · Right 0/5</strong></div>
-              <div class="capture-dots hand-dots" id="captureDots">
-                <div class="capture-dot-group" data-hand="left">
-                  <span class="dot-label">Left</span>
-                  <span class="dot" data-hand="left" data-i="0"></span>
-                  <span class="dot" data-hand="left" data-i="1"></span>
-                  <span class="dot" data-hand="left" data-i="2"></span>
-                  <span class="dot" data-hand="left" data-i="3"></span>
-                  <span class="dot" data-hand="left" data-i="4"></span>
+            <div class="registration-mode-tabs" id="registrationModeTabs" role="tablist" aria-label="Registration method">
+              <button
+                class="registration-mode-tab active"
+                id="cameraRegistrationTab"
+                type="button"
+                role="tab"
+                aria-selected="true"
+                aria-controls="cameraRegistrationPanel"
+                data-registration-mode="camera"
+              >
+                <strong>Camera capture</strong>
+                <span>Guided live captures</span>
+              </button>
+              <button
+                class="registration-mode-tab"
+                id="uploadRegistrationTab"
+                type="button"
+                role="tab"
+                aria-selected="false"
+                aria-controls="uploadRegistrationPanel"
+                data-registration-mode="upload"
+              >
+                <strong>Upload images</strong>
+                <span>5 left + 5 right photos</span>
+              </button>
+            </div>
+
+            <div class="registration-mode-panel active" id="cameraRegistrationPanel" data-registration-mode-panel="camera" role="tabpanel" aria-labelledby="cameraRegistrationTab">
+              <div class="registration-status" id="registrationStatus">
+                <div class="sample-title" id="regSampleTitle">Left hand sample 1/5: Center palm</div>
+                <div class="sample-desc" id="regSampleDesc">Use your actual left hand: palm facing camera, fingers up, wrist visible.</div>
+                <div class="capture-counter-inline">Samples captured: <strong id="captureCounter">Left 0/5 · Right 0/5</strong></div>
+                <div class="capture-dots hand-dots" id="captureDots">
+                  <div class="capture-dot-group" data-hand="left">
+                    <span class="dot-label">Left</span>
+                    <span class="dot" data-hand="left" data-i="0"></span>
+                    <span class="dot" data-hand="left" data-i="1"></span>
+                    <span class="dot" data-hand="left" data-i="2"></span>
+                    <span class="dot" data-hand="left" data-i="3"></span>
+                    <span class="dot" data-hand="left" data-i="4"></span>
+                  </div>
+                  <div class="capture-dot-group" data-hand="right">
+                    <span class="dot-label">Right</span>
+                    <span class="dot" data-hand="right" data-i="0"></span>
+                    <span class="dot" data-hand="right" data-i="1"></span>
+                    <span class="dot" data-hand="right" data-i="2"></span>
+                    <span class="dot" data-hand="right" data-i="3"></span>
+                    <span class="dot" data-hand="right" data-i="4"></span>
+                  </div>
                 </div>
-                <div class="capture-dot-group" data-hand="right">
-                  <span class="dot-label">Right</span>
-                  <span class="dot" data-hand="right" data-i="0"></span>
-                  <span class="dot" data-hand="right" data-i="1"></span>
-                  <span class="dot" data-hand="right" data-i="2"></span>
-                  <span class="dot" data-hand="right" data-i="3"></span>
-                  <span class="dot" data-hand="right" data-i="4"></span>
+                <ul class="quality-list" id="qualityList">
+                  <li><span>Status</span><strong class="neutral">Enter NIM and name to start</strong></li>
+                </ul>
+              </div>
+
+              <div class="register-hint" id="registerHint">
+                Enter NIM and name, then start registration to capture 5 left-hand and 5 right-hand samples.
+              </div>
+
+              <div class="register-actions">
+                <button class="btn btn-primary" id="btnStartRegistration">Start registration</button>
+                <button class="btn btn-secondary" id="btnCaptureSample" disabled>Capture sample</button>
+                <button class="btn btn-primary" id="btnFinalizeRegistration" disabled>Finalize</button>
+                <button class="btn btn-ghost" id="btnCancelRegistration" disabled>Cancel</button>
+              </div>
+            </div>
+
+            <div class="registration-mode-panel" id="uploadRegistrationPanel" data-registration-mode-panel="upload" role="tabpanel" aria-labelledby="uploadRegistrationTab" hidden>
+              <div class="upload-registration-grid">
+                <div class="upload-picker" id="uploadLeftPicker">
+                  <div class="upload-picker-head">
+                    <strong>Left hand photos</strong>
+                    <span class="upload-count" id="uploadLeftCount">0/5</span>
+                  </div>
+                  <label class="upload-file-label" for="uploadLeftFiles">
+                    <input class="upload-file-input" id="uploadLeftFiles" type="file" accept="image/*" multiple />
+                    <span>Select exactly 5 full-hand photos</span>
+                  </label>
+                  <div class="upload-file-list" id="uploadLeftList">No files selected.</div>
+                </div>
+
+                <div class="upload-picker" id="uploadRightPicker">
+                  <div class="upload-picker-head">
+                    <strong>Right hand photos</strong>
+                    <span class="upload-count" id="uploadRightCount">0/5</span>
+                  </div>
+                  <label class="upload-file-label" for="uploadRightFiles">
+                    <input class="upload-file-input" id="uploadRightFiles" type="file" accept="image/*" multiple />
+                    <span>Select exactly 5 full-hand photos</span>
+                  </label>
+                  <div class="upload-file-list" id="uploadRightList">No files selected.</div>
                 </div>
               </div>
-              <ul class="quality-list" id="qualityList">
-                <li><span>Status</span><strong class="neutral">Enter NIM and name to start</strong></li>
-              </ul>
-            </div>
 
-            <div class="register-hint" id="registerHint">
-              Enter NIM and name, then start registration to capture 5 left-hand and 5 right-hand samples.
-            </div>
+              <div class="register-hint" id="uploadRegisterHint">
+                Upload full-hand photos. PalmGate will detect the palm ROI with the same runtime MediaPipe path.
+              </div>
 
-            <div class="register-actions">
-              <button class="btn btn-primary" id="btnStartRegistration">Start registration</button>
-              <button class="btn btn-secondary" id="btnCaptureSample" disabled>Capture sample</button>
-              <button class="btn btn-primary" id="btnFinalizeRegistration" disabled>Finalize</button>
-              <button class="btn btn-ghost" id="btnCancelRegistration" disabled>Cancel</button>
+              <div class="register-actions upload-register-actions">
+                <button class="btn btn-primary" id="btnUploadRegister" type="button" disabled>Register from uploads</button>
+                <button class="btn btn-ghost" id="btnClearUploadFiles" type="button">Clear files</button>
+              </div>
             </div>
 
             <div class="register-feedback" id="registerFeedback"></div>

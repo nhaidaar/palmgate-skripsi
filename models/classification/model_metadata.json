@@ -1,0 +1,24 @@
+{
+  "embedding_dim": 128,
+  "img_size": [
+    224,
+    224
+  ],
+  "input_range": "0-255 float32 (preprocess_input EfficientNet di dalam model)",
+  "similarity": "cosine L2-norm",
+  "operating_threshold": 0.8965586423873901,
+  "operating_far": 0.01,
+  "cv_eer_pooled": 0.11454145340355562,
+  "cv_eer_ci95": [
+    0.09275276314813441,
+    0.1366355735232302
+  ],
+  "cv_auc": 0.9493784118663579,
+  "tta_rotations": [
+    0.0,
+    -6.0,
+    6.0
+  ],
+  "split_by_hand_train": false,
+  "preprocessing": "ROI palm_classification (rembg + Otsu + FFT/rotasi) -> resize 224"
+}

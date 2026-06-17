@@ -1,4 +1,6 @@
 import importlib
+import os
+from pathlib import Path
 
 
 def test_device_runtime_env_overrides(monkeypatch):
@@ -36,6 +38,7 @@ def test_notebook_rembg_env_override(monkeypatch):
 
 def test_embedding_model_defaults(monkeypatch):
     monkeypatch.delenv("MODEL_PATH", raising=False)
+    monkeypatch.delenv("MODEL_VERSION", raising=False)
     monkeypatch.delenv("MODEL_METADATA_PATH", raising=False)
     monkeypatch.delenv("SIMILARITY_THRESHOLD", raising=False)
     monkeypatch.delenv("EMBEDDING_DIM", raising=False)
@@ -43,13 +46,82 @@ def test_embedding_model_defaults(monkeypatch):
     import app.config as config
     importlib.reload(config)
 
-    assert config.MODEL_PATH == config.BASE_DIR / "models" / "embedding" / "palm_embedding.tflite"
-    assert config.MODEL_METADATA_PATH == config.BASE_DIR / "models" / "embedding" / "model_metadata.json"
+    assert config.MODEL_VERSION == "embedding_new_roi_v2"
+    assert config.MODEL_PATH == config.BASE_DIR / "models" / "embedding_new_roi_v2" / "model.tflite"
+    assert config.MODEL_METADATA_PATH == config.BASE_DIR / "models" / "embedding_new_roi_v2" / "model_metadata.json"
     assert config.EMBEDDING_DIM == 128
     assert config.SIMILARITY_THRESHOLD == 0.745932400226593
     assert config.TTA_ROTATIONS == (0.0, -6.0, 6.0)
     assert config.ENROLLMENT_TTA_ENABLED is True
     assert config.RECOGNITION_TTA_ENABLED is False
+
+
+def test_dotenv_loader_sets_missing_env_without_overriding(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "MODEL_VERSION=from_env_file\n"
+        "MODEL_PATH=/tmp/from-env.tflite\n"
+        "IGNORED_LINE\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("MODEL_VERSION", raising=False)
+    monkeypatch.setenv("MODEL_PATH", "/already-set.tflite")
+
+    import app.config as config
+    config._load_env_file(env_file)
+
+    assert os.environ["MODEL_VERSION"] == "from_env_file"
+    assert os.environ["MODEL_PATH"] == "/already-set.tflite"
+
+
+def test_dotenv_loader_ignores_read_errors(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("MODEL_VERSION=from_file\n", encoding="utf-8")
+
+    import app.config as config
+
+    original_read_text = Path.read_text
+
+    def read_text(path, *args, **kwargs):
+        if path == env_file:
+            raise OSError("permission denied")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+
+    config._load_env_file(env_file)
+
+
+def test_env_example_documents_default_model_version(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    project_root = Path(__file__).resolve().parent.parent
+    env_example = (project_root / ".env.example").read_text()
+
+    assert "MODEL_VERSION=embedding_new_roi_v2" in env_example
+    assert "MODEL_PATH=" in env_example
+
+
+def test_model_version_env_uses_versioned_model_folder(monkeypatch):
+    monkeypatch.delenv("MODEL_PATH", raising=False)
+    monkeypatch.delenv("MODEL_METADATA_PATH", raising=False)
+    monkeypatch.setenv("MODEL_VERSION", "embedding")
+
+    import app.config as config
+    importlib.reload(config)
+
+    assert config.MODEL_PATH == config.BASE_DIR / "models" / "embedding" / "model.tflite"
+    assert config.MODEL_METADATA_PATH == config.BASE_DIR / "models" / "embedding" / "model_metadata.json"
+
+
+def test_model_path_env_overrides_model_version(tmp_path, monkeypatch):
+    explicit_model = tmp_path / "custom.tflite"
+    monkeypatch.setenv("MODEL_PATH", str(explicit_model))
+    monkeypatch.setenv("MODEL_VERSION", "embedding")
+
+    import app.config as config
+    importlib.reload(config)
+
+    assert config.MODEL_PATH == explicit_model
 
 
 def test_model_metadata_overrides_threshold_and_dim(tmp_path, monkeypatch):

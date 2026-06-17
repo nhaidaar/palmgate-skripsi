@@ -1,6 +1,6 @@
 /* ================================================================
    Palm Access — Biometric identification
-   Browser-side: MediaPipe hand detection + client ROI crop
+   Browser-side: MediaPipe hand detection + server ROI preprocessing
 ================================================================ */
 
 // MediaPipe imports - loaded dynamically to avoid blocking if CDN fails
@@ -39,6 +39,8 @@ const state = {
   usbScanEventSource: null,
   // Registration state
   registrationActive: false,
+  registrationMode: 'camera',
+  uploadBusy: false,
   registrationStatusTimer: null,
   capturedSamples: [],
   registrationCounts: { left: 0, right: 0 },
@@ -72,6 +74,17 @@ const btnStartRegistration = $('btnStartRegistration');
 const btnCaptureSample = $('btnCaptureSample');
 const btnFinalizeRegistration = $('btnFinalizeRegistration');
 const btnCancelRegistration = $('btnCancelRegistration');
+const registrationModeTabs = document.querySelectorAll('[data-registration-mode]');
+const uploadLeftFiles = $('uploadLeftFiles');
+const uploadRightFiles = $('uploadRightFiles');
+const uploadLeftPicker = $('uploadLeftPicker');
+const uploadRightPicker = $('uploadRightPicker');
+const uploadLeftCount = $('uploadLeftCount');
+const uploadRightCount = $('uploadRightCount');
+const uploadLeftList = $('uploadLeftList');
+const uploadRightList = $('uploadRightList');
+const btnUploadRegister = $('btnUploadRegister');
+const btnClearUploadFiles = $('btnClearUploadFiles');
 
 // ── MediaPipe init ───────────────────────────────────────────────
 let handLandmarker = null;
@@ -256,74 +269,6 @@ function updateBrightnessBadge(videoEl, landmarks, badgeId) {
   badge.style.display = 'block';
 }
 
-// ── Client-side ROI extraction ───────────────────────────────────
-// Mirrors the server's extract_palm_roi() logic, using landmarks already
-// computed by the browser's MediaPipe instance. Sends a small JPEG crop
-// instead of a full-resolution PNG, eliminating server-side detection.
-//
-// Mirrors server-side PalmProcessor.extract_palm_roi(): rotate around the
-// wrist/middle-MCP palm center, then crop from the aligned palm ROI.
-//
-// Returns { data: base64string }; ROI is already aligned.
-function extractClientROI(videoEl, landmarks) {
-  const w = videoEl.videoWidth  || 640;
-  const h = videoEl.videoHeight || 480;
-
-  const wrist     = landmarks[WRIST];
-  const indexMcp  = landmarks[INDEX_MCP];
-  const middleMcp = landmarks[MIDDLE_MCP];
-  const pinkyMcp  = landmarks[PINKY_MCP];
-
-  const dx = (pinkyMcp.x - indexMcp.x) * w;
-  const dy = (pinkyMcp.y - indexMcp.y) * h;
-  const angleDeg = Math.atan2(dy, dx) * (180 / Math.PI);
-
-  const centerCx = (wrist.x + middleMcp.x) / 2 * w;
-  const centerCy = (wrist.y + middleMcp.y) / 2 * h;
-  const rad = angleDeg * (Math.PI / 180);
-  const cosA = Math.cos(rad);
-  const sinA = Math.sin(rad);
-
-  function rotPt(px, py) {
-    const rx = cosA * (px - centerCx) + sinA * (py - centerCy) + centerCx;
-    const ry = -sinA * (px - centerCx) + cosA * (py - centerCy) + centerCy;
-    return [rx, ry];
-  }
-
-  const [centerRx, centerRy] = rotPt(centerCx, centerCy);
-  const [idxRx] = rotPt(indexMcp.x * w, indexMcp.y * h);
-  const [pnkRx] = rotPt(pinkyMcp.x * w, pinkyMcp.y * h);
-
-  const cx = Math.round(centerRx);
-  const cy = Math.round(centerRy);
-  const palmWidth = Math.abs(Math.round(idxRx - pnkRx));
-  const roiSize = Math.max(Math.round(palmWidth * 1.5), 60);
-  const half = Math.round(roiSize / 2);
-
-  const x1 = Math.max(0, cx - half);
-  const y1 = Math.max(0, cy - half);
-  const cropW = Math.min(w, cx + half) - x1;
-  const cropH = Math.min(h, cy + half) - y1;
-
-  // Draw the rotated video frame into an intermediate canvas, then crop
-  const rotCanvas = document.createElement('canvas');
-  rotCanvas.width  = w;
-  rotCanvas.height = h;
-  const rctx = rotCanvas.getContext('2d');
-  rctx.save();
-  rctx.translate(centerCx, centerCy);
-  rctx.rotate(-rad);
-  rctx.translate(-centerCx, -centerCy);
-  rctx.drawImage(videoEl, 0, 0, w, h);
-  rctx.restore();
-
-  const roiCanvas = document.createElement('canvas');
-  roiCanvas.width  = cropW;
-  roiCanvas.height = cropH;
-  roiCanvas.getContext('2d').drawImage(rotCanvas, x1, y1, cropW, cropH, 0, 0, cropW, cropH);
-
-  return { data: roiCanvas.toDataURL('image/jpeg', 0.9) };
-}
 
 // ── Ring progress ────────────────────────────────────────────────
 function updateRingProgress() {
@@ -523,15 +468,7 @@ async function triggerScan() {
   triggerFlash('captureFlash');
   showScanning();
 
-  // Use client-side ROI extraction if landmarks available (matches registration pipeline)
-  let b64, isRoi = false;
-  if (state.lastLandmarks && state.lastLandmarks.length > 0) {
-    const roi = extractClientROI(video, state.lastLandmarks[0]);
-    b64 = roi.data;
-    isRoi = true;
-  } else {
-    b64 = captureFrame(video);
-  }
+  const b64 = captureFrame(video);
 
   const scanStart = performance.now();
 
@@ -539,7 +476,7 @@ async function triggerScan() {
     const res = await fetch('/api/recognize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: b64, is_roi: isRoi }),
+      body: JSON.stringify({ image: b64, is_roi: false }),
     });
     const elapsed = Math.round(performance.now() - scanStart);
 
@@ -854,13 +791,7 @@ function captureBrowserSample() {
   }
 
   const hand = getCurrentRegistrationHand();
-  let b64;
-  if (state.lastLandmarks && state.lastLandmarks.length > 0) {
-    const roi = extractClientROI(videoReg, state.lastLandmarks[0]);
-    b64 = roi.data;
-  } else {
-    b64 = captureFrame(videoReg);
-  }
+  const b64 = captureFrame(videoReg);
 
   triggerFlash('captureFlashReg');
   state.capturedSamples.push({ data: b64, hand });
@@ -888,7 +819,7 @@ async function finalizeBrowserRegistration() {
         name,
         images: state.capturedSamples.map((c) => c.data),
         hands: state.capturedSamples.map((c) => c.hand),
-        is_roi: true,
+        is_roi: false,
       }),
     });
     const data = await res.json();
@@ -926,12 +857,18 @@ function updateRegistrationUI() {
   renderQualityList(state.lastGuidance);
 
   const active = state.registrationActive;
+  const busy = state.uploadBusy;
+  registrationModeTabs.forEach((tab) => {
+    tab.disabled = active || busy;
+  });
+  updateUploadRegistrationUI();
+
   const hasNim = userNim?.value?.trim()?.length > 0;
   const hasName = userName?.value?.trim()?.length > 0;
-  if (btnStartRegistration) btnStartRegistration.disabled = active || !hasNim || !hasName;
-  if (btnCaptureSample) btnCaptureSample.disabled = !active || !(state.lastGuidance?.acceptable);
-  if (btnFinalizeRegistration) btnFinalizeRegistration.disabled = !active || !isRegistrationComplete();
-  if (btnCancelRegistration) btnCancelRegistration.disabled = !active;
+  if (btnStartRegistration) btnStartRegistration.disabled = active || busy || !hasNim || !hasName;
+  if (btnCaptureSample) btnCaptureSample.disabled = !active || busy || !(state.lastGuidance?.acceptable);
+  if (btnFinalizeRegistration) btnFinalizeRegistration.disabled = !active || busy || !isRegistrationComplete();
+  if (btnCancelRegistration) btnCancelRegistration.disabled = !active || busy;
 }
 
 function renderQualityList(guidance) {
@@ -973,13 +910,145 @@ function renderQualityList(guidance) {
   }).join('');
 }
 
+function setRegistrationMode(mode) {
+  if (!['camera', 'upload'].includes(mode)) return;
+  if (state.registrationActive || state.uploadBusy) return;
+  state.registrationMode = mode;
+
+  registrationModeTabs.forEach((tab) => {
+    const active = tab.dataset.registrationMode === mode;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-selected', String(active));
+  });
+
+  document.querySelectorAll('[data-registration-mode-panel]').forEach((panel) => {
+    const active = panel.dataset.registrationModePanel === mode;
+    panel.classList.toggle('active', active);
+    panel.hidden = !active;
+  });
+
+  updateRegistrationUI();
+  updateUploadRegistrationUI();
+}
+
+function uploadFiles(input) {
+  return Array.from(input?.files || []);
+}
+
+function uploadFileSummary(input) {
+  const files = uploadFiles(input);
+  if (!files.length) return 'No files selected.';
+  const names = files.slice(0, 3).map((file) => file.name).join(', ');
+  return files.length > 3 ? `${names}, +${files.length - 3} more` : names;
+}
+
+function paintUploadPicker(input, picker, countEl, listEl) {
+  if (!input || !picker || !countEl || !listEl) return;
+  const count = input.files.length;
+  countEl.textContent = `${count}/${REGISTRATION_CAPTURES_PER_HAND}`;
+  listEl.textContent = uploadFileSummary(input);
+  picker.classList.toggle('ok', count === REGISTRATION_CAPTURES_PER_HAND);
+  picker.classList.toggle('bad', count > 0 && count !== REGISTRATION_CAPTURES_PER_HAND);
+}
+
+function uploadSelectionComplete() {
+  return uploadLeftFiles.files.length === REGISTRATION_CAPTURES_PER_HAND && uploadRightFiles.files.length === REGISTRATION_CAPTURES_PER_HAND;
+}
+
+function updateUploadRegistrationUI() {
+  paintUploadPicker(uploadLeftFiles, uploadLeftPicker, uploadLeftCount, uploadLeftList);
+  paintUploadPicker(uploadRightFiles, uploadRightPicker, uploadRightCount, uploadRightList);
+
+  const hasNim = userNim?.value?.trim()?.length > 0;
+  const hasName = userName?.value?.trim()?.length > 0;
+  if (btnUploadRegister) {
+    btnUploadRegister.disabled = (
+      state.registrationMode !== 'upload'
+      || state.registrationActive
+      || state.uploadBusy
+      || !hasNim
+      || !hasName
+      || !uploadSelectionComplete()
+    );
+  }
+}
+
+function clearUploadRegistration(updateUi = true) {
+  if (uploadLeftFiles) uploadLeftFiles.value = '';
+  if (uploadRightFiles) uploadRightFiles.value = '';
+  if (updateUi) updateUploadRegistrationUI();
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function finalizeUploadRegistration() {
+  const nim = userNim.value.trim();
+  const name = userName.value.trim();
+  if (!nim) return setFeedback('NIM is required', 'error');
+  if (!name) return setFeedback('Name is required', 'error');
+  if (!uploadSelectionComplete()) {
+    return setFeedback('Upload exactly 5 left-hand and 5 right-hand photos.', 'error');
+  }
+
+  state.uploadBusy = true;
+  updateUploadRegistrationUI();
+  setFeedback('Reading uploaded images…', '');
+
+  try {
+    const [leftImages, rightImages] = await Promise.all([
+      Promise.all(uploadFiles(uploadLeftFiles).map(fileToDataUrl)),
+      Promise.all(uploadFiles(uploadRightFiles).map(fileToDataUrl)),
+    ]);
+
+    setFeedback('Registering uploaded palms…', '');
+    const res = await fetch('/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nim,
+        name,
+        images: [...leftImages, ...rightImages],
+        hands: [...Array(REGISTRATION_CAPTURES_PER_HAND).fill('left'), ...Array(REGISTRATION_CAPTURES_PER_HAND).fill('right')],
+        is_roi: false,
+      }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.detail || 'Upload registration failed');
+    }
+
+    state.uploadBusy = false;
+    clearUploadRegistration(false);
+    resetRegistration();
+    setRegistrationMode('upload');
+    setFeedback(`✓ ${data.name} enrolled successfully`, 'success');
+    await loadUsers();
+    await loadStats();
+  } catch (err) {
+    setFeedback(err.message + ' — please try again.', 'error');
+  } finally {
+    state.uploadBusy = false;
+    updateUploadRegistrationUI();
+  }
+}
+
 function resetRegistration() {
   state.registrationActive = false;
+  state.uploadBusy = false;
   state.capturedSamples = [];
   state.registrationCounts = { left: 0, right: 0 };
   state.currentSampleIndex = 0;
   state.lastGuidance = null;
   stopRegistrationStatusPolling();
+  clearUploadRegistration(false);
   userNim.value = '';
   userName.value = '';
   updateRegistrationUI();
@@ -1094,8 +1163,18 @@ function updateHandGuideOverlay(metrics) {
 function syncStartRegistrationDisabled() {
   const hasNim = userNim?.value?.trim()?.length > 0;
   const hasName = userName?.value?.trim()?.length > 0;
-  if (btnStartRegistration) btnStartRegistration.disabled = state.registrationActive || !hasNim || !hasName;
+  if (btnStartRegistration) btnStartRegistration.disabled = state.registrationActive || state.uploadBusy || !hasNim || !hasName;
+  updateUploadRegistrationUI();
 }
+
+registrationModeTabs.forEach((tab) => {
+  tab.addEventListener('click', () => setRegistrationMode(tab.dataset.registrationMode));
+});
+
+uploadLeftFiles?.addEventListener('change', updateUploadRegistrationUI);
+uploadRightFiles?.addEventListener('change', updateUploadRegistrationUI);
+btnUploadRegister?.addEventListener('click', finalizeUploadRegistration);
+btnClearUploadFiles?.addEventListener('click', () => clearUploadRegistration());
 
 userNim?.addEventListener('input', syncStartRegistrationDisabled);
 userName?.addEventListener('input', syncStartRegistrationDisabled);
@@ -1262,6 +1341,7 @@ const esc = (s) =>
 
     // Initialize registration UI
     updateRegistrationUI();
+    updateUploadRegistrationUI();
   } catch (err) {
     console.error('[PalmAccess] Init error:', err);
   }
