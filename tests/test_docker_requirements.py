@@ -23,7 +23,7 @@ def test_env_example_selects_usb_compose_profile_by_default():
     assert "COMPOSE_PROFILES=usb" in env_example
     assert "DEVICE_RUNTIME_ENABLED=1" in env_example
     assert "CAMERA_SOURCE=usb" in env_example
-    assert "PALMGATE_CAMERA_DEVICE=/dev/video0" in env_example
+    assert "CAMERA_DEVICE_PATH=/dev/video0" in env_example
     assert "PALMGATE_MODELS_DIR=./models" in env_example
 
 
@@ -38,8 +38,8 @@ def test_usb_compose_uses_configurable_camera_device_path():
     compose = Path("docker-compose.yml").read_text()
 
     assert "CAMERA_SOURCE=usb" in compose
-    assert "CAMERA_DEVICE_PATH=/dev/video1" in compose
-    assert "${PALMGATE_CAMERA_DEVICE:-/dev/video0}:/dev/video1" in compose
+    assert "CAMERA_DEVICE_PATH=${CAMERA_DEVICE_PATH:-/dev/video0}" in compose
+    assert "${CAMERA_DEVICE_PATH:-/dev/video0}:${CAMERA_DEVICE_PATH:-/dev/video0}" in compose
     assert "usb-046d_C270_HD_WEBCAM" not in compose
 
 

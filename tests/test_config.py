@@ -6,7 +6,7 @@ from pathlib import Path
 def test_device_runtime_env_overrides(monkeypatch):
     monkeypatch.setenv("DEVICE_RUNTIME_ENABLED", "1")
     monkeypatch.setenv("CAMERA_SOURCE", "usb")
-    monkeypatch.setenv("CAMERA_DEVICE_INDEX", "0")
+    monkeypatch.setenv("CAMERA_DEVICE_PATH", "/dev/video0")
     monkeypatch.setenv("APP_HOST", "0.0.0.0")
 
     import app.config as config
@@ -14,7 +14,7 @@ def test_device_runtime_env_overrides(monkeypatch):
 
     assert config.DEVICE_RUNTIME_ENABLED is True
     assert config.CAMERA_SOURCE == "usb"
-    assert config.CAMERA_DEVICE_INDEX == 0
+    assert config.CAMERA_DEVICE_PATH == "/dev/video0"
     assert config.APP_HOST == "0.0.0.0"
 
 

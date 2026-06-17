@@ -21,7 +21,7 @@ python -m pytest tests/ -v
 python -m pytest tests/test_notebook_preprocessing.py -v
 
 # Run device worker (Orange Pi with USB camera)
-DEVICE_RUNTIME_ENABLED=1 CAMERA_SOURCE=usb CAMERA_DEVICE_INDEX=0 python -m app.device_runtime
+DEVICE_RUNTIME_ENABLED=1 CAMERA_SOURCE=usb CAMERA_DEVICE_PATH=/dev/video0 python -m app.device_runtime
 
 # Seed users from images
 python scripts/seed_users.py seeds
@@ -57,8 +57,7 @@ USB registration captures 5 samples per hand, stores one normalized template per
 |----------|---------|---------|
 | `DEVICE_RUNTIME_ENABLED` | `0` | Enable USB camera worker |
 | `CAMERA_SOURCE` | `browser` | `browser` or `usb` |
-| `CAMERA_DEVICE_INDEX` | `0` | USB camera index |
-| `CAMERA_DEVICE_PATH` | - | Override camera path (e.g., `/dev/video0`) |
+| `CAMERA_DEVICE_PATH` | `/dev/video0` | Camera device path (e.g., `/dev/video0`, `/dev/video1`) |
 | `DB_PATH` | `palmprint.db` | SQLite database location |
 | `MODEL_VERSION` | `embedding_new_roi_v2` | Use `models/<version>/model.tflite` and `models/<version>/model_metadata.json` |
 | `MODEL_PATH` | `models/<MODEL_VERSION>/model.tflite` | Explicit model path; overrides `MODEL_VERSION` |

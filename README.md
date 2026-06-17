@@ -159,7 +159,7 @@ This is the easiest way to test before attaching a USB camera.
 When the USB camera is connected to the Orange Pi, run the device worker:
 
 ```bash
-DEVICE_RUNTIME_ENABLED=1 CAMERA_SOURCE=usb CAMERA_DEVICE_INDEX=0 python -m app.device_runtime
+DEVICE_RUNTIME_ENABLED=1 CAMERA_SOURCE=usb CAMERA_DEVICE_PATH=/dev/video0 python -m app.device_runtime
 ```
 
 The worker will:
