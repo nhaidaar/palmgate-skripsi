@@ -623,16 +623,27 @@ btnStartRegistration?.addEventListener('click', async () => {
 });
 
 btnCaptureSample?.addEventListener('click', async () => {
-  if (!state.registrationActive) return;
+  if (!state.registrationActive || state.isRecognizing) return;
 
-  if (state.usbDeviceMode) {
-    const result = await apiCaptureSample();
-    if (result.detail) return setFeedback(result.detail, 'error');
-    triggerFlash('captureFlashReg');
-    setFeedback(`Captured sample ${result.sample_index + 1}.`, 'success');
-    await refreshRegistrationStatus();
-  } else {
-    captureBrowserSample();
+  state.isRecognizing = true;
+  btnCaptureSample.disabled = true;
+  const originalText = btnCaptureSample.textContent;
+  btnCaptureSample.textContent = 'Capturing...';
+
+  try {
+    if (state.usbDeviceMode) {
+      const result = await apiCaptureSample();
+      if (result.detail) return setFeedback(result.detail, 'error');
+      triggerFlash('captureFlashReg');
+      setFeedback(`Captured sample ${result.sample_index + 1}.`, 'success');
+      await refreshRegistrationStatus();
+    } else {
+      captureBrowserSample();
+    }
+  } finally {
+    state.isRecognizing = false;
+    btnCaptureSample.textContent = originalText;
+    updateRegistrationUI(); // Re-evaluate button states
   }
 });
 
