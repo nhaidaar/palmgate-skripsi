@@ -215,6 +215,14 @@ class DeviceRuntime:
             sample_index = self.registration_session.current_sample_index
 
             frame = self._read_frame()
+
+            import os
+            import cv2
+            save_dir = os.path.join("data", "captures", f"{self.registration_session.nim}_{self.registration_session.id}")
+            os.makedirs(save_dir, exist_ok=True)
+            hand = self._hand_for_sample_index(sample_index)
+            cv2.imwrite(os.path.join(save_dir, f"{hand}_{sample_index}.jpg"), cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+
             embedding = self.palm_processor.get_embedding_from_notebook_frame(
                 frame,
                 tta_enabled=ENROLLMENT_TTA_ENABLED,
@@ -223,7 +231,7 @@ class DeviceRuntime:
                 raise RuntimeError("Palm preprocessing failed")
             sample = {
                 "sample_index": sample_index,
-                "hand": self._hand_for_sample_index(sample_index),
+                "hand": hand,
                 "quality_score": float(guidance.get("score", 1.0)),
                 "embedding": embedding,
             }

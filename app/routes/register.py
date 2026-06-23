@@ -1,4 +1,7 @@
 import binascii
+import os
+import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -54,12 +57,19 @@ async def register(req: RegisterRequest):
     if any(hands.count(hand) != REGISTRATION_CAPTURES_PER_HAND for hand in REGISTRATION_HANDS):
         raise HTTPException(status_code=400, detail=required_detail)
 
+    session_id = str(uuid.uuid4())
+    save_dir = os.path.join("data", "captures", f"{nim}_{session_id}")
+    os.makedirs(save_dir, exist_ok=True)
+    import cv2
+
     samples = []
     for i, img_b64 in enumerate(req.images):
         try:
             frame = decode_base64_image(img_b64)
         except (ValueError, binascii.Error) as exc:
             raise HTTPException(status_code=400, detail=f"Invalid image at index {i}") from exc
+
+        cv2.imwrite(os.path.join(save_dir, f"{hands[i]}_{i}.jpg"), cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
 
         if req.is_roi:
             emb = palm_processor.get_embedding_from_roi(
