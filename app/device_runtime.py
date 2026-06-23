@@ -218,7 +218,8 @@ class DeviceRuntime:
 
             import os
             import cv2
-            save_dir = os.path.join("data", "captures", f"{self.registration_session.nim}_{self.registration_session.id}")
+            base_data_dir = "/data" if os.path.exists("/data") else "data"
+            save_dir = os.path.join(base_data_dir, "captures", f"{self.registration_session.nim}_{self.registration_session.id}")
             os.makedirs(save_dir, exist_ok=True)
             hand = self._hand_for_sample_index(sample_index)
             cv2.imwrite(os.path.join(save_dir, f"{hand}_{sample_index}.jpg"), cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))

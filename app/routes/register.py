@@ -58,7 +58,9 @@ async def register(req: RegisterRequest):
         raise HTTPException(status_code=400, detail=required_detail)
 
     session_id = str(uuid.uuid4())
-    save_dir = os.path.join("data", "captures", f"{nim}_{session_id}")
+    # Save to the persistent /data volume if it exists (Docker), otherwise local data/
+    base_data_dir = "/data" if os.path.exists("/data") else "data"
+    save_dir = os.path.join(base_data_dir, "captures", f"{nim}_{session_id}")
     os.makedirs(save_dir, exist_ok=True)
     import cv2
 
