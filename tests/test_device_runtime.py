@@ -75,6 +75,142 @@ def test_runtime_recognizes_after_hold_threshold():
     assert runtime.db.logged[0][4] == 1200
 
 
+def test_runtime_unlocks_once_for_allowed_match():
+    from app.device_runtime import DeviceRuntime
+
+    class FakeClock:
+        def __init__(self):
+            self.now_ms = 0
+
+        def now(self):
+            return self.now_ms
+
+    class FakeCamera:
+        def read(self):
+            return np.zeros((240, 320, 3), dtype=np.uint8)
+
+    class FakeProcessor:
+        def get_registration_guidance_metrics(self, frame, previous_metrics=None):
+            return {"hand_detected": True, "hand_clipped": False}
+
+        def get_embedding_from_notebook_frame(self, frame, tta_enabled=False):
+            return np.ones(4, dtype=np.float32)
+
+        def compute_similarity(self, embedding, stored, threshold):
+            return {
+                "status": "ALLOWED",
+                "name": "Naufal",
+                "similarity": 0.91,
+                "closest_match": "Naufal",
+                "user_id": 1,
+            }
+
+    class FakeDB:
+        def __init__(self):
+            self.logged = []
+
+        def get_all_embeddings(self):
+            return [{"id": 1, "name": "Naufal", "embedding": np.ones(4, dtype=np.float32)}]
+
+        def add_access_log(self, user_id, matched_name, status, similarity, duration_ms=None, description=None):
+            self.logged.append((user_id, matched_name, status, similarity, duration_ms, description))
+
+        def upsert_device_status(self, **kwargs):
+            self.status = kwargs
+
+    class FakeLock:
+        def __init__(self):
+            self.unlock_calls = 0
+
+        def unlock(self):
+            self.unlock_calls += 1
+
+    lock = FakeLock()
+    runtime = DeviceRuntime(
+        camera=FakeCamera(),
+        palm_processor=FakeProcessor(),
+        db=FakeDB(),
+        clock=FakeClock(),
+        hold_ms=1000,
+        lock_controller=lock,
+    )
+
+    runtime.tick()
+    runtime.clock.now_ms = 1200
+    result = runtime.tick()
+
+    assert result["status"] == "ALLOWED"
+    assert lock.unlock_calls == 1
+
+
+def test_runtime_does_not_unlock_for_denied_match():
+    from app.device_runtime import DeviceRuntime
+
+    class FakeClock:
+        def __init__(self):
+            self.now_ms = 0
+
+        def now(self):
+            return self.now_ms
+
+    class FakeCamera:
+        def read(self):
+            return np.zeros((240, 320, 3), dtype=np.uint8)
+
+    class FakeProcessor:
+        def get_registration_guidance_metrics(self, frame, previous_metrics=None):
+            return {"hand_detected": True, "hand_clipped": False}
+
+        def get_embedding_from_notebook_frame(self, frame, tta_enabled=False):
+            return np.ones(4, dtype=np.float32)
+
+        def compute_similarity(self, embedding, stored, threshold):
+            return {
+                "status": "DENIED",
+                "name": "Unknown",
+                "similarity": 0.5,
+                "closest_match": "Naufal",
+                "user_id": None,
+            }
+
+    class FakeDB:
+        def __init__(self):
+            self.logged = []
+
+        def get_all_embeddings(self):
+            return []
+
+        def add_access_log(self, user_id, matched_name, status, similarity, duration_ms=None, description=None):
+            self.logged.append((user_id, matched_name, status, similarity, duration_ms, description))
+
+        def upsert_device_status(self, **kwargs):
+            self.status = kwargs
+
+    class FakeLock:
+        def __init__(self):
+            self.unlock_calls = 0
+
+        def unlock(self):
+            self.unlock_calls += 1
+
+    lock = FakeLock()
+    runtime = DeviceRuntime(
+        camera=FakeCamera(),
+        palm_processor=FakeProcessor(),
+        db=FakeDB(),
+        clock=FakeClock(),
+        hold_ms=1000,
+        lock_controller=lock,
+    )
+
+    runtime.tick()
+    runtime.clock.now_ms = 1200
+    result = runtime.tick()
+
+    assert result["status"] == "DENIED"
+    assert lock.unlock_calls == 0
+
+
 def test_runtime_stores_latest_camera_frame_for_preview():
     from app.device_runtime import DeviceRuntime
 

@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import logging
 import queue
 import threading
 import time
@@ -23,10 +24,13 @@ from app.config import (
     REGISTRATION_MIN_VALID_PER_HAND,
     SIMILARITY_THRESHOLD,
 )
+from app.lock_controller import NoopLockController, build_lock_controller
 from app.services.embedding_templates import build_hand_templates, overall_template
 from app.services.recognition_service import match_embedding_and_log
 from app.services.registration_quality import SAMPLE_TARGETS, evaluate_guidance
 
+
+log = logging.getLogger("palmgate.device_runtime")
 
 @dataclass
 class DeviceRegistrationSession:
@@ -84,6 +88,7 @@ class DeviceRuntime:
         preview_frame_interval_ms: int = DEVICE_PREVIEW_FRAME_INTERVAL_MS,
         heartbeat_ms: int = DEVICE_STATUS_HEARTBEAT_MS,
         threshold: float = SIMILARITY_THRESHOLD,
+        lock_controller=None,
     ):
         self.camera = camera
         self.palm_processor = palm_processor
@@ -95,6 +100,7 @@ class DeviceRuntime:
         self.preview_frame_interval_ms = preview_frame_interval_ms
         self.heartbeat_ms = heartbeat_ms
         self.threshold = threshold
+        self.lock_controller = lock_controller or NoopLockController()
         self.hand_seen_since_ms = None
         self.cooldown_until_ms = 0
         self.last_heartbeat_ms = None
@@ -421,6 +427,11 @@ class DeviceRuntime:
             last_inference_ms=0.0,
             last_recognition_at=self.last_recognition_at,
         )
+        if result.get("status") == "ALLOWED":
+            try:
+                self.lock_controller.unlock()
+            except Exception:
+                log.exception("Door unlock failed")
         return result
 
     def _run_preview_loop(self):
@@ -471,11 +482,19 @@ class DeviceRuntime:
         close = getattr(self.camera, "close", None)
         if callable(close):
             close()
+        close_lock = getattr(self.lock_controller, "close", None)
+        if callable(close_lock):
+            close_lock()
 
 
 def build_device_runtime(palm_processor, db):
     camera = OpenCVCameraSource(CAMERA_DEVICE_PATH)
-    return DeviceRuntime(camera=camera, palm_processor=palm_processor, db=db)
+    return DeviceRuntime(
+        camera=camera,
+        palm_processor=palm_processor,
+        db=db,
+        lock_controller=build_lock_controller(),
+    )
 
 
 if __name__ == "__main__":

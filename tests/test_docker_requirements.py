@@ -7,6 +7,7 @@ def test_docker_requirements_use_active_runtime_dependencies():
     assert "mediapipe" in requirements
     assert "opencv-python-headless" in requirements
     assert "tflite-runtime" in requirements
+    assert "gpiod" in requirements
     assert "rembg" not in requirements
     assert "onnxruntime" not in requirements
 
@@ -25,6 +26,10 @@ def test_env_example_selects_usb_compose_profile_by_default():
     assert "CAMERA_SOURCE=usb" in env_example
     assert "CAMERA_DEVICE_PATH=/dev/video0" in env_example
     assert "PALMGATE_MODELS_DIR=./models" in env_example
+    assert "LOCK_GPIO_ENABLED=0" in env_example
+    assert "LOCK_GPIO_LINE=PC11" in env_example
+    assert "LOCK_ACTIVE_LOW=1" in env_example
+    assert "LOCK_UNLOCK_MS=2000" in env_example
 
 
 def test_readme_documents_default_usb_compose_start():
@@ -41,6 +46,17 @@ def test_usb_compose_uses_configurable_camera_device_path():
     assert "CAMERA_DEVICE_PATH=${CAMERA_DEVICE_PATH:-/dev/video0}" in compose
     assert "${CAMERA_DEVICE_PATH:-/dev/video0}:${CAMERA_DEVICE_PATH:-/dev/video0}" in compose
     assert "usb-046d_C270_HD_WEBCAM" not in compose
+
+
+def test_usb_compose_maps_gpiochip_for_lock_relay():
+    compose = Path("docker-compose.yml").read_text()
+
+    assert "LOCK_GPIO_ENABLED=${LOCK_GPIO_ENABLED:-0}" in compose
+    assert "LOCK_GPIO_CHIP=${LOCK_GPIO_CHIP:-/dev/gpiochip0}" in compose
+    assert "LOCK_GPIO_LINE=${LOCK_GPIO_LINE:-PC11}" in compose
+    assert "LOCK_ACTIVE_LOW=${LOCK_ACTIVE_LOW:-1}" in compose
+    assert "LOCK_UNLOCK_MS=${LOCK_UNLOCK_MS:-2000}" in compose
+    assert "${LOCK_GPIO_CHIP:-/dev/gpiochip0}:${LOCK_GPIO_CHIP:-/dev/gpiochip0}" in compose
 
 
 def test_usb_compose_uses_separate_preview_and_processing_intervals():

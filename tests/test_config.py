@@ -36,6 +36,23 @@ def test_notebook_rembg_env_override(monkeypatch):
     assert config.NOTEBOOK_REMBG_ENABLED is False
 
 
+def test_lock_gpio_env_defaults_and_overrides(monkeypatch):
+    monkeypatch.setenv("LOCK_GPIO_ENABLED", "1")
+    monkeypatch.setenv("LOCK_GPIO_CHIP", "/dev/gpiochip2")
+    monkeypatch.setenv("LOCK_GPIO_LINE", "42")
+    monkeypatch.setenv("LOCK_ACTIVE_LOW", "0")
+    monkeypatch.setenv("LOCK_UNLOCK_MS", "2500")
+
+    import app.config as config
+    importlib.reload(config)
+
+    assert config.LOCK_GPIO_ENABLED is True
+    assert config.LOCK_GPIO_CHIP == "/dev/gpiochip2"
+    assert config.LOCK_GPIO_LINE == "42"
+    assert config.LOCK_ACTIVE_LOW is False
+    assert config.LOCK_UNLOCK_MS == 2500
+
+
 def test_embedding_model_defaults(monkeypatch):
     monkeypatch.delenv("MODEL_PATH", raising=False)
     monkeypatch.delenv("MODEL_VERSION", raising=False)

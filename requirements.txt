@@ -6,6 +6,7 @@ numpy>=1.26,<2.0
 python-multipart==0.0.*
 scikit-learn==1.6.*
 tflite-runtime==2.14.* ; platform_system == "Linux"
+gpiod==2.5.* ; platform_system == "Linux"
 tensorflow==2.14.* ; platform_system != "Linux"
 ipykernel==6.* ; platform_system != "Linux"
 ipywidgets==8.* ; platform_system != "Linux"
