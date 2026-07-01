@@ -12,7 +12,6 @@ from app.config import (
     REGISTRATION_CAPTURES_PER_HAND,
     REGISTRATION_HANDS,
     REGISTRATION_MIN_VALID_PER_HAND,
-    REGISTRATION_TOTAL_CAPTURES,
 )
 from app.routes.recognize import decode_base64_image
 from app.services.embedding_templates import build_hand_templates, overall_template
@@ -45,16 +44,16 @@ async def register(req: RegisterRequest):
     if not req.name.strip():
         raise HTTPException(status_code=400, detail="Name is required")
 
-    required_detail = (
-        f"Need exactly {REGISTRATION_CAPTURES_PER_HAND} left-hand and "
-        f"{REGISTRATION_CAPTURES_PER_HAND} right-hand palm images"
-    )
+    required_detail = f"Need exactly {REGISTRATION_CAPTURES_PER_HAND} images for each selected hand"
     hands = [hand.lower() for hand in req.hands]
-    if len(req.images) != REGISTRATION_TOTAL_CAPTURES or len(hands) != len(req.images):
+    if not hands:
+        raise HTTPException(status_code=400, detail="Select at least one hand to register")
+    if len(hands) != len(req.images):
         raise HTTPException(status_code=400, detail=required_detail)
     if any(hand not in REGISTRATION_HANDS for hand in hands):
         raise HTTPException(status_code=400, detail=required_detail)
-    if any(hands.count(hand) != REGISTRATION_CAPTURES_PER_HAND for hand in REGISTRATION_HANDS):
+    selected_hands = tuple(hand for hand in REGISTRATION_HANDS if hand in hands)
+    if any(hands.count(hand) != REGISTRATION_CAPTURES_PER_HAND for hand in selected_hands):
         raise HTTPException(status_code=400, detail=required_detail)
 
     session_id = str(uuid.uuid4())
@@ -92,7 +91,7 @@ async def register(req: RegisterRequest):
     try:
         templates = build_hand_templates(
             samples,
-            required_hands=REGISTRATION_HANDS,
+            required_hands=selected_hands,
             min_per_hand=REGISTRATION_MIN_VALID_PER_HAND,
         )
     except ValueError as exc:

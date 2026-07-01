@@ -578,6 +578,38 @@ def test_capture_registration_sample_tags_first_five_left_next_five_right():
     assert [sample["hand"] for sample in samples] == ["left"] * 5 + ["right"] * 5
 
 
+def test_capture_registration_sample_uses_selected_hand_sequence():
+    from app.device_runtime import DeviceRuntime
+
+    class FakeCamera:
+        def read(self):
+            return np.zeros((240, 320, 3), dtype=np.uint8)
+
+    class FakeProcessor:
+        def get_embedding_from_notebook_frame(self, frame, tta_enabled=False):
+            return np.ones(4, dtype=np.float32)
+
+    runtime = DeviceRuntime(camera=FakeCamera(), palm_processor=FakeProcessor(), db=None)
+    runtime.start_registration("12345", "Alice", hands=["right"])
+
+    samples = []
+    for _ in range(5):
+        runtime.registration_session.last_guidance = {"acceptable": True, "score": 1.0}
+        samples.append(runtime.capture_registration_sample())
+
+    assert [sample["hand"] for sample in samples] == ["right"] * 5
+    assert runtime.get_registration_status()["total_required"] == 5
+    assert runtime.get_registration_status()["current_hand"] == "right"
+
+    runtime.registration_session.last_guidance = {"acceptable": True, "score": 1.0}
+    try:
+        runtime.capture_registration_sample()
+    except RuntimeError as exc:
+        assert "All registration samples captured" in str(exc)
+    else:
+        raise AssertionError("Expected selected hand sequence limit")
+
+
 def test_finalize_registration_stores_one_template_per_hand():
     from app.device_runtime import DeviceRuntime
 

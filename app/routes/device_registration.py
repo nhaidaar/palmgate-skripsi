@@ -12,6 +12,7 @@ router = APIRouter(prefix="/api/device-registration")
 class StartRegistrationRequest(BaseModel):
     nim: str = ""
     name: str
+    hands: list[str] = []
 
 
 class StartRegistrationResponse(BaseModel):
@@ -45,7 +46,10 @@ async def start_registration(req: StartRegistrationRequest):
         raise HTTPException(status_code=400, detail="Name is required")
     runtime = _runtime()
     try:
-        runtime.start_registration(nim, name)
+        if req.hands:
+            runtime.start_registration(nim, name, hands=req.hands)
+        else:
+            runtime.start_registration(nim, name)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     status = runtime.get_registration_status()

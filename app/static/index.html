@@ -260,7 +260,7 @@
         <div class="register-form-col">
           <div class="form-block">
             <h2 class="form-title">Register new user</h2>
-            <p class="form-desc">Follow 5 left-hand and 5 right-hand captures to enroll. PalmGate stores both palms so either hand can unlock.</p>
+            <p class="form-desc">Choose left, right, or both. Default captures 5 left-hand and 5 right-hand samples so either hand can unlock.</p>
 
             <div class="field-group">
               <label class="field-label" for="userNim">NIM</label>
@@ -309,15 +309,18 @@
                 data-registration-mode="upload"
               >
                 <strong>Upload images</strong>
-                <span>5 left + 5 right photos</span>
+                <span>Selected hands · 5 photos each</span>
               </button>
             </div>
 
             <div class="registration-mode-panel active" id="cameraRegistrationPanel" data-registration-mode-panel="camera" role="tabpanel" aria-labelledby="cameraRegistrationTab">
               <div class="registration-status" id="registrationStatus">
+                <div class="registration-hand-select" aria-label="Hands to register">
+                  <button class="registration-hand-chip active" id="registrationLeftHand" type="button" data-hand-toggle="left" aria-pressed="true">Left <span id="registrationLeftCount">0/5</span></button>
+                  <button class="registration-hand-chip active" id="registrationRightHand" type="button" data-hand-toggle="right" aria-pressed="true">Right <span id="registrationRightCount">0/5</span></button>
+                </div>
                 <div class="sample-title" id="regSampleTitle">Left hand sample 1/5: Center palm</div>
                 <div class="sample-desc" id="regSampleDesc">Use your actual left hand: palm facing camera, fingers up, wrist visible.</div>
-                <div class="capture-counter-inline">Samples captured: <strong id="captureCounter">Left 0/5 · Right 0/5</strong></div>
                 <div class="capture-dots hand-dots" id="captureDots">
                   <div class="capture-dot-group" data-hand="left">
                     <span class="dot-label">Left</span>
@@ -336,9 +339,7 @@
                     <span class="dot" data-hand="right" data-i="4"></span>
                   </div>
                 </div>
-                <ul class="quality-list" id="qualityList">
-                  <li><span>Status</span><strong class="neutral">Enter NIM and name to start</strong></li>
-                </ul>
+                <div class="registration-quality-line neutral" id="registrationQualityLine">Enter NIM and name to start.</div>
               </div>
 
               <div class="register-hint" id="registerHint">
@@ -354,6 +355,10 @@
             </div>
 
             <div class="registration-mode-panel" id="uploadRegistrationPanel" data-registration-mode-panel="upload" role="tabpanel" aria-labelledby="uploadRegistrationTab" hidden>
+              <div class="registration-hand-select upload-hand-select" aria-label="Hands to upload">
+                <button class="registration-hand-chip active" id="uploadRegistrationLeftHand" type="button" data-hand-toggle="left" aria-pressed="true">Left <span id="uploadRegistrationLeftCount">0/5</span></button>
+                <button class="registration-hand-chip active" id="uploadRegistrationRightHand" type="button" data-hand-toggle="right" aria-pressed="true">Right <span id="uploadRegistrationRightCount">0/5</span></button>
+              </div>
               <div class="upload-registration-grid">
                 <div class="upload-picker" id="uploadLeftPicker">
                   <div class="upload-picker-head">
@@ -381,7 +386,7 @@
               </div>
 
               <div class="register-hint" id="uploadRegisterHint">
-                Upload full-hand photos. PalmGate will detect the palm ROI with the same runtime MediaPipe path.
+                Selected hands need exactly 5 full-hand photos each. PalmGate will detect the palm ROI with the same runtime MediaPipe path.
               </div>
 
               <div class="register-actions upload-register-actions">

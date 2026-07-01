@@ -41,14 +41,13 @@ class FakeProcessor:
         return {"status": "DENIED", "name": "Unknown", "similarity": 0.1}
 
 
-def test_register_rejects_fewer_than_ten_images():
+def test_register_rejects_images_without_hand_selection():
     client = TestClient(app)
 
     response = client.post("/api/register", json={"nim": "12345", "name": "Alice", "images": ["img"] * 9})
 
     assert response.status_code == 400
-    assert "5 left" in response.json()["detail"]
-    assert "5 right" in response.json()["detail"]
+    assert "Select at least one hand" in response.json()["detail"]
 
 
 def test_register_rejects_missing_hand_labels():
@@ -57,8 +56,7 @@ def test_register_rejects_missing_hand_labels():
     response = client.post("/api/register", json={"nim": "12345", "name": "Alice", "images": ["img"] * 10})
 
     assert response.status_code == 400
-    assert "5 left" in response.json()["detail"]
-    assert "5 right" in response.json()["detail"]
+    assert "Select at least one hand" in response.json()["detail"]
 
 
 def test_register_rejects_unbalanced_hand_labels():
@@ -70,8 +68,7 @@ def test_register_rejects_unbalanced_hand_labels():
     )
 
     assert response.status_code == 400
-    assert "5 left" in response.json()["detail"]
-    assert "5 right" in response.json()["detail"]
+    assert "5 images for each selected hand" in response.json()["detail"]
 
 
 def test_register_saves_two_hand_templates_with_nim(monkeypatch):
@@ -160,3 +157,59 @@ def test_register_rejects_duplicate_nim(monkeypatch):
 
     assert response.status_code == 409
     assert "NIM already exists" in response.json()["detail"]
+
+
+def test_register_saves_left_only_template(monkeypatch):
+    import app.main as main
+    import app.routes.register as register_route
+
+    fake_db = FakeDB()
+    fake_processor = FakeProcessor()
+    monkeypatch.setattr(main, "db", fake_db)
+    monkeypatch.setattr(main, "palm_processor", fake_processor)
+    monkeypatch.setattr(register_route, "decode_base64_image", lambda image: np.zeros((2, 2, 3), dtype=np.uint8))
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/register",
+        json={"nim": "12345", "name": "Alice", "images": ["img"] * 5, "hands": ["left"] * 5, "is_roi": True},
+    )
+
+    assert response.status_code == 200
+    assert len(fake_db.individual_embeddings) == 1
+    assert fake_db.embedding_hands == ["left"]
+    assert fake_processor.similarity_checks == 1
+
+
+def test_register_saves_right_only_template(monkeypatch):
+    import app.main as main
+    import app.routes.register as register_route
+
+    fake_db = FakeDB()
+    fake_processor = FakeProcessor()
+    monkeypatch.setattr(main, "db", fake_db)
+    monkeypatch.setattr(main, "palm_processor", fake_processor)
+    monkeypatch.setattr(register_route, "decode_base64_image", lambda image: np.zeros((2, 2, 3), dtype=np.uint8))
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/register",
+        json={"nim": "12345", "name": "Alice", "images": ["img"] * 5, "hands": ["right"] * 5, "is_roi": True},
+    )
+
+    assert response.status_code == 200
+    assert len(fake_db.individual_embeddings) == 1
+    assert fake_db.embedding_hands == ["right"]
+    assert fake_processor.similarity_checks == 1
+
+
+def test_register_rejects_missing_selected_hand_samples():
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/register",
+        json={"nim": "12345", "name": "Alice", "images": ["img"] * 4, "hands": ["left"] * 4},
+    )
+
+    assert response.status_code == 400
+    assert "5 images for each selected hand" in response.json()["detail"]

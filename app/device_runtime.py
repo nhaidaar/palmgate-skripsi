@@ -21,7 +21,6 @@ from app.config import (
     REGISTRATION_CAPTURES_PER_HAND,
     REGISTRATION_HANDS,
     REGISTRATION_MIN_VALID_PER_HAND,
-    REGISTRATION_TOTAL_CAPTURES,
     SIMILARITY_THRESHOLD,
 )
 from app.services.embedding_templates import build_hand_templates, overall_template
@@ -34,6 +33,7 @@ class DeviceRegistrationSession:
     id: str
     nim: str
     name: str
+    hands: tuple[str, ...] = REGISTRATION_HANDS
     current_sample_index: int = 0
     captured_samples: list = field(default_factory=list)
     last_guidance: dict | None = None
@@ -126,9 +126,27 @@ class DeviceRuntime:
             frame = self.capture_preview_frame()
         return frame
 
-    def _hand_for_sample_index(self, index: int) -> str:
+    def _selected_registration_hands(self, hands=None) -> tuple[str, ...]:
+        if hands is None:
+            return REGISTRATION_HANDS
+        selected = []
+        for hand in hands:
+            clean = str(hand).lower()
+            if clean not in REGISTRATION_HANDS:
+                raise RuntimeError("Select left, right, or both hands")
+            if clean not in selected:
+                selected.append(clean)
+        if not selected:
+            raise RuntimeError("Select at least one hand to register")
+        return tuple(hand for hand in REGISTRATION_HANDS if hand in selected)
+
+    def _registration_total_captures(self, hands=None) -> int:
+        return REGISTRATION_CAPTURES_PER_HAND * len(hands or REGISTRATION_HANDS)
+
+    def _hand_for_sample_index(self, index: int, hands=None) -> str:
+        selected_hands = hands or REGISTRATION_HANDS
         hand_index = index // REGISTRATION_CAPTURES_PER_HAND
-        return REGISTRATION_HANDS[min(hand_index, len(REGISTRATION_HANDS) - 1)]
+        return selected_hands[min(hand_index, len(selected_hands) - 1)]
 
     def _target_index_for_sample_index(self, index: int) -> int:
         return index % REGISTRATION_CAPTURES_PER_HAND
@@ -141,7 +159,7 @@ class DeviceRuntime:
 
             counts = {hand: 0 for hand in REGISTRATION_HANDS}
             for i, sample in enumerate(session.captured_samples):
-                hand = sample.get("hand", self._hand_for_sample_index(i))
+                hand = sample.get("hand", self._hand_for_sample_index(i, session.hands))
                 if hand in counts:
                     counts[hand] += 1
 
@@ -155,8 +173,8 @@ class DeviceRuntime:
                 "captured_count": len(session.captured_samples),
                 "guidance": session.last_guidance,
                 "required_per_hand": REGISTRATION_CAPTURES_PER_HAND,
-                "total_required": REGISTRATION_TOTAL_CAPTURES,
-                "current_hand": self._hand_for_sample_index(session.current_sample_index),
+                "total_required": self._registration_total_captures(session.hands),
+                "current_hand": self._hand_for_sample_index(session.current_sample_index, session.hands),
                 "left_count": counts.get("left", 0),
                 "right_count": counts.get("right", 0),
             }
@@ -178,9 +196,10 @@ class DeviceRuntime:
             return None
         return encoded.tobytes()
 
-    def start_registration(self, nim: str, name: str):
+    def start_registration(self, nim: str, name: str, hands=None):
         clean_nim = nim.strip()
         clean_name = name.strip()
+        selected_hands = self._selected_registration_hands(hands)
         if not clean_nim:
             raise RuntimeError("NIM is required")
         if not clean_name:
@@ -192,6 +211,7 @@ class DeviceRuntime:
                 id=str(uuid.uuid4()),
                 nim=clean_nim,
                 name=clean_name,
+                hands=selected_hands,
             )
             self.worker_state = "registration_active"
             self.hand_seen_since_ms = None
@@ -207,7 +227,7 @@ class DeviceRuntime:
         with self._registration_lock:
             if self.registration_session is None:
                 raise RuntimeError("No registration active")
-            if self.registration_session.current_sample_index >= REGISTRATION_TOTAL_CAPTURES:
+            if self.registration_session.current_sample_index >= self._registration_total_captures(self.registration_session.hands):
                 raise RuntimeError("All registration samples captured")
             guidance = self.registration_session.last_guidance
             if not guidance or not guidance.get("acceptable", False):
@@ -221,7 +241,7 @@ class DeviceRuntime:
             base_data_dir = "/data" if os.path.exists("/data") else "data"
             save_dir = os.path.join(base_data_dir, "captures", f"{self.registration_session.nim}_{self.registration_session.id}")
             os.makedirs(save_dir, exist_ok=True)
-            hand = self._hand_for_sample_index(sample_index)
+            hand = self._hand_for_sample_index(sample_index, self.registration_session.hands)
             cv2.imwrite(os.path.join(save_dir, f"{hand}_{sample_index}.jpg"), cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
 
             embedding = self.palm_processor.get_embedding_from_notebook_frame(
@@ -249,14 +269,14 @@ class DeviceRuntime:
             samples = []
             for item in self.registration_session.captured_samples:
                 samples.append({
-                    "hand": item.get("hand", self._hand_for_sample_index(item["sample_index"])),
+                    "hand": item.get("hand", self._hand_for_sample_index(item["sample_index"], self.registration_session.hands)),
                     "embedding": item["embedding"],
                 })
 
             try:
                 templates = build_hand_templates(
                     samples,
-                    required_hands=REGISTRATION_HANDS,
+                    required_hands=self.registration_session.hands,
                     min_per_hand=REGISTRATION_MIN_VALID_PER_HAND,
                 )
             except ValueError as exc:
@@ -316,7 +336,8 @@ class DeviceRuntime:
                 if self.registration_session.last_guidance:
                     previous_metrics = self.registration_session.last_guidance.get("metrics")
                 metrics = self.palm_processor.get_registration_guidance_metrics(frame, previous_metrics)
-                sample_index = min(self.registration_session.current_sample_index, REGISTRATION_TOTAL_CAPTURES - 1)
+                total = self._registration_total_captures(self.registration_session.hands)
+                sample_index = min(self.registration_session.current_sample_index, total - 1)
                 target_index = self._target_index_for_sample_index(sample_index)
                 guidance = evaluate_guidance(target_index, metrics)
                 target = SAMPLE_TARGETS[target_index]

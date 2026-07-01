@@ -1249,11 +1249,50 @@ body {
 .registration-status {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  padding: 1rem;
+  gap: 0.65rem;
+  padding: 0.85rem;
   background: var(--surface-alt);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
+}
+
+.registration-hand-select {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.registration-hand-chip {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 36px;
+  padding: 0 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-family: var(--font);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.registration-hand-chip span {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-3);
+}
+
+.registration-hand-chip.active {
+  border-color: var(--accent-border);
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.registration-hand-chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
 }
 
 .registration-mode-tabs {
@@ -1397,8 +1436,18 @@ body {
   line-height: 1.45;
 }
 
-.upload-register-actions .btn:first-child {
-  flex: 2;
+.upload-picker.disabled {
+  opacity: 0.55;
+  border-style: solid;
+}
+
+.upload-picker.disabled .upload-file-label {
+  cursor: not-allowed;
+}
+
+.upload-register-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
 }
 
 .sample-title {
@@ -1454,6 +1503,24 @@ body {
   background: var(--success);
   transform: scale(1.1);
 }
+
+.capture-dot-group.muted {
+  opacity: 0.35;
+}
+
+.registration-quality-line {
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.registration-quality-line.ok { color: var(--success); }
+.registration-quality-line.warn { color: oklch(65% 0.18 85); }
+.registration-quality-line.bad { color: var(--error); }
+.registration-quality-line.neutral { color: var(--text-3); }
 
 /* Quality list */
 .quality-list {
@@ -1537,4 +1604,14 @@ body {
   .register-actions .btn {
     width: 100%;
   }
+}
+
+.upload-register-actions.register-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.upload-register-actions.register-actions .btn {
+  width: 100%;
+  min-width: 0;
 }

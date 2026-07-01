@@ -32,6 +32,8 @@ htmlcov/
 .ipynb_checkpoints/
 
 # Database (runtime data, not source)
+palmprint.db
+*.db.bak
 *.sqlite
 *.sqlite3
 
@@ -59,7 +61,9 @@ desktop.ini
 
 # Unnecessary / local things
 .superpowers/
+data/captures/*
 docs/
 designs/
 Dataset*/
 seeds/
+test_script.py
