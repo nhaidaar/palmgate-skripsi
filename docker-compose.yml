@@ -10,8 +10,10 @@ x-palmgate-common: &palmgate-common
     # ML model files live under the project models/ directory.
     - ${PALMGATE_MODELS_DIR:-./models}/${MODEL_VERSION:-embedding_new_roi_v2}:/app/models/${MODEL_VERSION:-embedding_new_roi_v2}:ro
     - ./hand_landmarker.task:/app/hand_landmarker.task:ro
-    # Persistent storage for the SQLite database
+    # Persistent storage for the SQLite database.
     - palmgate-db:/data
+    # Save registration captures into ./data/captures on the host.
+    - ./data/captures:/data/captures
 
   # Optional: uncomment to limit resource usage on a small VPS
   # deploy:
